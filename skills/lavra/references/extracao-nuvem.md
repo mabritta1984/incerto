@@ -118,8 +118,8 @@ cópia local; a leitura direta de `gs://` fica fora, decisão 3a do PO de 28/09)
   parede, custo (ou "não informado");
 - **por rota**: itens, fallbacks e não aprovados de cada `route`, mais a linha `parse` (páginas);
 - **equações**: detectadas, origem do LaTeX, perdas, validador por documento e parseáveis pelo SymPy
-  (medido a partir da V6.1 pela função de parse do `extrair_entidades.py`, com a definição de
-  "parseável" da decisão 2 do PO de 28/09);
+  (`n/total`, medido pela função de parse do `extrair_equacoes.py` (Task 8), com a definição de
+  "parseável" da decisão 2 do PO de 28/09; "não medido" só se o import dele ou do `sympy` falhar);
 - **perdas declaradas**: documento, item, rota e o `feedback` da última tentativa (ex.: `finishReason=MAX_TOKENS`);
 - **veredito por documento**: apto ou reprovado, com os motivos.
 

@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from _carga import RAIZ, carregar
 
+sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))   # vizinhos do
+sys.modules.setdefault("extrair_equacoes", carregar("skills/lavra/scripts/extrair_equacoes.py"))   # import local
 co = carregar("skills/lavra/scripts/conferir_onda.py")
 
 SCRIPT = os.path.join(RAIZ, "skills", "lavra", "scripts", "conferir_onda.py")
@@ -55,7 +57,7 @@ class TesteResumo(unittest.TestCase):
         self.assertEqual(eq["equacoes_detectadas"], 11)
         self.assertEqual(eq["latex_invalido_final"], 0)
         self.assertEqual((eq["documentos_com_equacao"], eq["documentos_katex"]), (2, 2))
-        self.assertIsNone(eq["parseaveis_sympy"])          # D8: sympy não é permitido aqui (bloco ao PO)
+        self.assertEqual(eq["parseaveis_sympy"], {"parseaveis": 1, "total": 15})   # via extrair_equacoes.py (decisão 1b)
 
     def test_custo_nulo_e_nao_informado_nunca_zero(self):
         self.assertIsNone(self.r["custo_usd"])
@@ -80,8 +82,8 @@ class TesteRelatorio(unittest.TestCase):
         self.assertIn("8 de 11", self.md)
         self.assertIn("245784", self.md)
         self.assertIn("não informado", self.md)
-        self.assertIn("não medido", self.md)
-        self.assertIn("extrair_entidades.py", self.md)          # decisão 1b do PO (28/09): medido a partir da V6.1
+        self.assertIn("| parseáveis pelo SymPy | 1/15 |", self.md)   # decisão 1b do PO (28/09): extrair_equacoes.py (Task 8)
+        self.assertNotIn("não medido", self.md)
         self.assertNotIn("pendente", self.md)
 
     def test_nada_do_lote_e_nada_de_timestamp(self):

@@ -16,8 +16,8 @@ documento). Com `--aprovar`, grava `manifesto.json` em `extraidos/<onda>/` e cop
 um apto de fora por decisão do PO. Nunca apaga `extraidos/` e nunca reescreve `conferidos/`.
 
 Tudo vem dos `.report.json`; o `lote-<data>.md` nunca é lido (o `rerender` do mineiro não o regrava).
-Parse pelo SymPy: não medido aqui até a V6.1; então vem da função de parse do `extrair_entidades.py`, por
-import local, sem `sympy` neste arquivo (D8; decisão 1b do PO, 28/09).
+Parseáveis pelo SymPy: medido pela função de parse do `extrair_equacoes.py` (Task 8), por import local,
+sem `sympy` neste arquivo (decisão 1b do PO, 28/09); "não medido" só se esse import (ou o do `sympy`) falhar.
 Só biblioteca padrão. Não converte nada: o conversor é o `mineiro`.
 
 Uso:
@@ -132,7 +132,7 @@ def conferir_documento(pasta, nome):
     motivos, perdas = [], []
     doc = {"documento": nome, "veredito": "reprovado", "motivos": motivos, "perdas": perdas,
            "sha256_md": None, "sha256_report": None, "original": None, "engine": None,
-           "model_versions": [], "validador": None, "equacoes_detectadas": 0, "_relatorio": None}
+           "model_versions": [], "validador": None, "equacoes_detectadas": 0, "_relatorio": None, "_md": None}
     if not RE_EXTENSAO_DE_ORIGEM.match(nome):
         motivos.append("nome sem a extensão de origem (esperado <nome>.<ext>.md, ex.: Relatorio.pdf.md)")
     c_md, c_rel = os.path.join(pasta, nome + SUF_MD), os.path.join(pasta, nome + SUF_REL)
@@ -157,6 +157,7 @@ def conferir_documento(pasta, nome):
         motivos.append("relatório ilegível: %s" % e)
         return doc
     doc["_relatorio"] = rel
+    doc["_md"] = md
     doc["original"] = rel["source"]
     doc["engine"] = (rel["summary"].get("parse") or {}).get("engine")
     doc["model_versions"] = sorted(rel["summary"].get("model_versions") or [], key=_bytes)
@@ -187,6 +188,23 @@ def _ordenado(d):
     return {k: d[k] for k in sorted(d, key=_bytes)}
 
 
+def parseaveis_sympy(docs):
+    """`{"parseaveis", "total"}` dos blocos `$$…$$` dos `.md` legíveis, pela definição estrita de "parseável"
+    do `extrair_equacoes.py` (decisão 2 do PO, 28/09); None só se o import dele ou do `sympy` falhar."""
+    try:
+        from extrair_equacoes import equacoes_do_documento, parsear_latex   # vizinho; decisão 1b
+        n = total = 0
+        for d in docs:
+            if d.get("_md") is None:
+                continue
+            for eq in equacoes_do_documento(d["_md"], d["documento"] + SUF_MD):
+                total += 1
+                n += 1 if parsear_latex(eq["latex"])["ok"] else 0
+    except ImportError:
+        return None
+    return {"parseaveis": n, "total": total}
+
+
 def resumir(docs):
     """Totais da onda somados dos `.report.json` legíveis (inclusive dos reprovados), nunca do lote."""
     r = {"documentos": len(docs), "aptos": sum(d["veredito"] == "apto" for d in docs), "itens": 0,
@@ -194,7 +212,7 @@ def resumir(docs):
          "mermaid_valido": 0, "mermaid_total": 0, "model_versions": [], "custo_usd": None, "custo_parcial": False}
     r["reprovados"] = r["documentos"] - r["aptos"]
     rotas, eq, modelos, custos = {}, dict.fromkeys(CAMPOS_EQ, 0), set(), []
-    eq.update(documentos_com_equacao=0, documentos_katex=0, parseaveis_sympy=None)
+    eq.update(documentos_com_equacao=0, documentos_katex=0, parseaveis_sympy=parseaveis_sympy(docs))
     paginas_falhas = 0
     for d in docs:
         rel = d["_relatorio"]
@@ -280,7 +298,9 @@ def relatorio_md(onda, docs, r):
               eq["fallback_imagem"], eq["texto_mantido"], eq["descritas"], eq["com_erro"]),
           "| LaTeX inválido na 1ª tentativa / no fim | %d / %d |" % (eq["latex_invalido_1a_tentativa"], eq["latex_invalido_final"]),
           "| documentos com equação validados pelo KaTeX | %d de %d |" % (eq["documentos_katex"], eq["documentos_com_equacao"]),
-          "| parseáveis pelo SymPy | não medido: vem do `extrair_entidades.py` a partir da V6.1 (D8; decisão 1b do PO) |",
+          "| parseáveis pelo SymPy | %s |" % ("não medido: `extrair_equacoes.py` ou `sympy` indisponível (decisão 1b do PO)"
+                                               if eq["parseaveis_sympy"] is None else
+                                               "%d/%d" % (eq["parseaveis_sympy"]["parseaveis"], eq["parseaveis_sympy"]["total"])),
           "", "## Perdas declaradas", ""]
     perdas = [(d["documento"], p) for d in docs for p in d["perdas"]]
     if perdas:
