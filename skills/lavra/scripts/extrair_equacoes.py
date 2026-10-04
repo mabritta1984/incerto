@@ -13,12 +13,15 @@ documentos e são pulados.
      `\\begin{aligned}`, …) é perda `nao_suportado:<cmd>` antes do parse;
   2. normalização: `\\tag`, `\\label`, `\\left`/`\\right`, tamanhos e espaçamentos saem; símbolo composto
      com marcação explícita vira um símbolo único (`T_{max}` → `T_max`, `f^{*}` → `f_star`,
-     `\\mathit{TC}` → `TC`, `x_{1}` → `x_1`); `\\mathbb{E}[X]` → `E(X)`; `\\operatorname{Var}(X)` → função
-     `Var`. Sequência de letras sem marcação (`TC`) NÃO é normalizada: não há como saber se é `T·C`;
+     `\\mathit{TC}` → `TC`, `x_{1}` → `x_1`); `\\mathbb{E}[X]` e `E[X]` → `E(X)`; `\\operatorname{Var}(X)` →
+     função `Var`. Sequência de letras sem marcação (`TC`) NÃO é normalizada: não há como saber se é `T·C`;
+     também são perda, por ambíguas: expoente seguido de `_` ou `(` (`x^{2}_{i}`, `f^{-1}(x)`), letra
+     seguida de `[` e decorações (`\\overline`, `\\hat`, …);
   3. `sympy.parsing.latex.parse_latex(..., strict=True)`; erro é perda `strict`;
   4. conferência: todo símbolo e toda função do resultado têm de ser um token inteiro do LaTeX
      normalizado (`TC` lido como `T·C` é `simbolo_partido:TC`); símbolo com nome de comando LaTeX
-     (`mathrm`, `dots`, …) e relação encadeada (`a = b = c`) também são perda.
+     (`mathrm`, `dots`, …), relação encadeada (`a = b = c`) e função aplicada que não veio de marcação
+     explícita (`p(1-p)`, `\\alpha(1-\\alpha)`, `g(x)`: `nao_suportado:p(`) também são perda.
 Perda é ⚠️ com o LaTeX preservado como veio; nunca some.
 
 Uso:
@@ -51,6 +54,9 @@ NAO_SUPORTADOS = (
     r"\\exists(?![A-Za-z])",
     r"\\(?:dots|cdots|ldots|vdots|ddots)(?![A-Za-z])",        # reticência: a fórmula não está inteira
     r"\\\\",                                                  # quebra de linha
+    # decorações: o SymPy as lê como operações (`\overline{x}` → conjugate(x)) ou como símbolos falsos
+    r"\\(?:overline|underline|widehat|widetilde|hat|bar|tilde|check|breve|dot|ddot|vec|acute|grave|mathring|"
+    r"overrightarrow|overleftarrow|underbrace|overbrace)(?![A-Za-z])",
 )
 # Marcação que sobrou depois da normalização: o parser a leria como símbolo (`Symbol('mathrm')`).
 RESIDUAIS = r"\\(?:mathbb|mathrm|mathit|mathbf|mathcal|mathsf|boldsymbol|operatorname|text|textrm|mbox)(?![A-Za-z])"
@@ -93,6 +99,27 @@ def _fechamento(texto, i, abre, fecha):
     return -1
 
 
+def _depois_do_expoente(t):
+    """`_` ou `(` logo depois de um expoente (`^x`, `^\\cmd`, `^{…}`), ou None."""
+    for m in re.finditer(r"\^\s*", t):
+        i = m.end()
+        if i >= len(t):
+            continue
+        if t[i] == "{":
+            fim = _fechamento(t, i, "{", "}")
+            if fim < 0:
+                continue
+            fim += 1
+        elif t[i] == "\\":
+            fim = i + len(re.match(r"\\(?:[A-Za-z]+|.)", t[i:]).group(0))
+        else:
+            fim = i + 1
+        resto = t[fim:].lstrip()
+        if resto[:1] in ("_", "("):
+            return resto[0]
+    return None
+
+
 def _preparar(latex):
     """Devolve (texto com marcas, [(tipo, nome canônico)], motivo). Tipo `simbolo` (composto) ou `funcao`."""
     for padrao in NAO_SUPORTADOS:
@@ -110,17 +137,18 @@ def _preparar(latex):
             marcas.append((tipo, nome))
         return _MARCA % marcas.index((tipo, nome))
 
-    # esperança e operadores nomeados viram aplicação de função
+    # esperança e operadores nomeados viram aplicação de função; é a ÚNICA origem de função aceita (marca
+    # `funcao`): letra solta seguida de `(` é produto ou aplicação, ambíguo, e vira perda depois do parse
     while True:
-        m = re.search(r"\\mathbb\s*\{\s*E\s*\}\s*([\[(])", t)
+        m = re.search(r"(?:\\mathbb\s*\{\s*E\s*\}\s*([\[(])|(?<![A-Za-z\\])E\s*(\[))", t)
         if not m:
             break
-        fim = _fechamento(t, m.start(1), m.group(1), "]" if m.group(1) == "[" else ")")
+        g = 1 if m.group(1) else 2
+        fim = _fechamento(t, m.start(g), m.group(g), "]" if m.group(g) == "[" else ")")
         if fim < 0:
             break
-        t = t[:m.start()] + "E(" + t[m.end(1):fim] + ")" + t[fim + 1:]
-    t = re.sub(r"\\operatorname\s*\{\s*([A-Za-z])\s*\}", r"\1", t)
-    t = re.sub(r"\\operatorname\s*\{\s*([A-Za-z]{2,})\s*\}", lambda m: marca("funcao", m.group(1)), t)
+        t = t[:m.start()] + marca("funcao", "E") + "(" + t[m.end(g):fim] + ")" + t[fim + 1:]
+    t = re.sub(r"\\operatorname\s*\{\s*([A-Za-z]+)\s*\}\s*(?=\()", lambda m: marca("funcao", m.group(1)), t)
     # compostos com marcação explícita viram um símbolo único
     t = re.sub(r"(%s)\s*\^\s*(?:\{\s*(?:\*|\\ast|\\star)\s*\}|\*|\\ast(?![A-Za-z])|\\star(?![A-Za-z]))" % _BASE,
                lambda m: marca("simbolo", _nome_da_base(m.group(1)) + "_star"), t)
@@ -132,6 +160,13 @@ def _preparar(latex):
         tipo, nome = marcas[int(m.group(1))]
         if tipo == "simbolo" and re.match(r"\s*\(", t[m.end():]):
             return None, [], "nao_suportado:%s(…)" % nome     # produto ou aplicação? ambíguo
+    m = re.search(r"(?<![A-Za-z\\])([A-Za-z])\s*\[", t)
+    if m:
+        return None, [], "nao_suportado:%s[" % m.group(1)      # `X[…]`: esperança sem marcação? produto?
+    seguinte = _depois_do_expoente(t)
+    if seguinte:
+        # `x^{2}_{i}`: o SymPy descarta o subscrito; `f^{-1}(x)`: inversa lida como produto
+        return None, [], "nao_suportado:^{…}%s" % seguinte
     m = re.search(RESIDUAIS, _RE_MARCA.sub(" ", t))
     if m:
         return None, [], "nao_suportado:%s" % m.group(0)
@@ -144,8 +179,10 @@ def normalizar_latex(latex):
     t, marcas, motivo = _preparar(latex)
     if motivo:
         return latex
-    return _RE_MARCA.sub(lambda m: ("\\mathit{%s}" if marcas[int(m.group(1))][0] == "simbolo" else "\\operatorname{%s}")
-                         % marcas[int(m.group(1))][1], t)
+    def escrita(m):
+        tipo, nome = marcas[int(m.group(1))]
+        return "\\mathit{%s}" % nome if tipo == "simbolo" else nome if len(nome) == 1 else "\\operatorname{%s}" % nome
+    return _RE_MARCA.sub(escrita, t)
 
 
 def _tokens(t, marcas):
@@ -183,7 +220,18 @@ def _perda(motivo):
 
 
 def parsear_latex(latex):
-    """LaTeX → `{"ok", "srepr", "simbolos", "motivo"}` pela definição estrita de "parseável" (ver o topo)."""
+    """LaTeX → `{"ok", "srepr", "simbolos", "motivo"}` pela definição estrita de "parseável" (ver o topo).
+    Falta do `sympy`/`antlr4` sobe como ImportError (o portão diz "não medido", o CLI falha alto); qualquer
+    outro erro inesperado é perda declarada `erro:<tipo>`, nunca um `ok`."""
+    try:
+        return _parsear(latex)
+    except ImportError:
+        raise
+    except Exception as e:
+        return _perda("erro:%s" % type(e).__name__)
+
+
+def _parsear(latex):
     from sympy import Function, Max, Min, Symbol, srepr
     from sympy.core.function import AppliedUndef
     from sympy.core.relational import Relational
@@ -216,8 +264,17 @@ def parsear_latex(latex):
     para_parse = [re.sub(r"_([A-Za-z0-9])", r"_{\1}", p) for p in para_parse]
     try:
         expr = parse_latex("".join(para_parse), strict=True)
+    except ImportError:
+        raise                                   # antlr4 ausente ou de outra série: não é perda, é ambiente
     except Exception:
         return _perda("strict")
+
+    # função aplicada só a que veio de marcação explícita (`\mathbb{E}[…]`, `E[…]`, `\operatorname{…}(…)`);
+    # `p(1-p)`, `\alpha(1-\alpha)`, `g(x)` seriam lidos como função: ambíguo, perda declarada
+    for f in sorted(expr.atoms(AppliedUndef), key=lambda f: _bytes(type(f).__name__)):
+        nome = type(f).__name__
+        if nome not in funcoes_de and nome not in ("max", "min"):
+            return _perda("nao_suportado:%s(" % _canonico(nome))
 
     troca = {}
     for s in expr.atoms(Symbol):

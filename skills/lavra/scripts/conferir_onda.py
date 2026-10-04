@@ -199,7 +199,12 @@ def parseaveis_sympy(docs):
                 continue
             for eq in equacoes_do_documento(d["_md"], d["documento"] + SUF_MD):
                 total += 1
-                n += 1 if parsear_latex(eq["latex"])["ok"] else 0
+                try:
+                    n += 1 if parsear_latex(eq["latex"])["ok"] else 0
+                except ImportError:
+                    raise
+                except Exception:
+                    pass                    # erro inesperado do parse: conta como não parseável, nunca derruba o portão
     except ImportError:
         return None
     return {"parseaveis": n, "total": total}

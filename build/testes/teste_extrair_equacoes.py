@@ -12,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from _carga import RAIZ, carregar
 
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))
@@ -68,6 +69,50 @@ class TesteParse(unittest.TestCase):
         for latex in (r"\mathrm{TC} = a", r"a \dots b", r"\text{if } x", r"\mathbb{R}"):
             r = parsear_latex(latex)
             self.assertFalse(r["ok"], latex)
+
+    def test_expoente_seguido_de_subscrito_e_perda(self):
+        # o SymPy descarta o subscrito em silêncio: `x^{2}_{i}` → Pow(x, 2)
+        for latex in (r"x^{2}_{i}", r"x^2_1", r"X^{2}_{n} = 1", r"x^{a}_{b}", r"x^2_{max}", r"x_i^{2}_{j}"):
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertEqual(r["motivo"], "nao_suportado:^{…}_", latex)
+
+    def test_expoente_seguido_de_parentese_e_perda(self):
+        for latex in (r"f^{-1}(x) = y", r"\sigma^{2}(x)"):        # inversa lida como produto
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertEqual(r["motivo"], "nao_suportado:^{…}(", latex)
+
+    def test_letra_seguida_de_parentese_e_perda(self):
+        # produto ou aplicação? o SymPy lê como Function('p'): ambíguo, perda declarada
+        casos = {r"\sigma^2 = p(1-p)": "p(", r"y = a(b+c)": "a(", r"\alpha(1-\alpha)": "alpha(",
+                 r"k(1+r)^{n}": "k(", r"g(x) = x(x+1)": "g(", r"E(X) = 1": "E(", r"f_{t}(x) = 1": "f_t("}
+        for latex, f in casos.items():
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertEqual(r["motivo"], "nao_suportado:" + f, latex)
+
+    def test_decoracoes_sao_perda(self):
+        # `\overline{x}` → conjugate(x) em strict; as outras viram operação ou símbolo falso
+        for cmd in ("overline", "underline", "widehat", "widetilde", "hat", "bar", "tilde", "check", "breve",
+                    "dot", "ddot", "vec"):
+            r = parsear_latex("\\%s{x} = 1" % cmd)
+            self.assertFalse(r["ok"], cmd); self.assertEqual(r["motivo"], "nao_suportado:\\" + cmd, cmd)
+
+    def test_colchete_so_na_esperanca(self):
+        r = parsear_latex(r"E[X] = 1")
+        self.assertTrue(r["ok"]); self.assertIn("Function('E')(Symbol('X'))", r["srepr"])
+        self.assertEqual(normalizar_latex(r"E[X]"), "E(X)")
+        for latex, motivo in ((r"x[1] = 2", "nao_suportado:x["), (r"P[A] = 1", "nao_suportado:P[")):
+            self.assertEqual(parsear_latex(latex)["motivo"], motivo)
+        self.assertTrue(parsear_latex(r"\sqrt[3]{x} = y")["ok"])
+
+    def test_sem_antlr4_sobe_import_error(self):
+        with mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente")):
+            with self.assertRaises(ImportError):
+                parsear_latex(r"x = 1")
+
+    def test_erro_inesperado_e_perda_declarada(self):
+        with mock.patch.object(EQ, "_parsear", side_effect=RuntimeError("bug")):
+            self.assertEqual(parsear_latex(r"x = 1"), {"ok": False, "srepr": None, "simbolos": [],
+                                                      "motivo": "erro:RuntimeError"})
 
     def test_subscrito_simples_canonico(self):
         r = parsear_latex(r"x_{1} + x_2 + \alpha_i")
@@ -212,6 +257,12 @@ class TesteCLI(unittest.TestCase):
             self.rodar()
         self.assertEqual(self.linhas(), editado)
 
+    def test_cli_sem_antlr4_falha_alto(self):
+        with mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente")):
+            with self.assertRaises(ImportError):
+                self.rodar()
+        self.assertFalse(os.path.exists(self.saida))
+
     def test_onda_invalida_e_onda_ausente(self):
         for onda in ("../x", "nao-existe"):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
@@ -228,6 +279,18 @@ class TestePortao(unittest.TestCase):
         self.assertEqual((int(m.group(1)), int(m.group(2))), (1, 15))
         self.assertNotIn("não medido", md)
         self.assertEqual(CO.resumir(docs)["equacoes"]["parseaveis_sympy"], {"parseaveis": 1, "total": 15})
+
+    def test_portao_sem_antlr4_diz_nao_medido(self):
+        docs = CO.ler_onda(os.path.join(FIXTURES, "extraidos", ONDA))
+        with mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente")):
+            r = CO.resumir(docs)
+        self.assertIsNone(r["equacoes"]["parseaveis_sympy"])
+        self.assertIn("| parseáveis pelo SymPy | não medido", CO.relatorio_md(ONDA, docs, r))
+
+    def test_portao_conta_erro_inesperado_como_nao_parseavel(self):
+        docs = CO.ler_onda(os.path.join(FIXTURES, "extraidos", ONDA))
+        with mock.patch.object(EQ, "parsear_latex", side_effect=RuntimeError("bug")):
+            self.assertEqual(CO.parseaveis_sympy(docs), {"parseaveis": 0, "total": 15})
 
 
 if __name__ == "__main__":
