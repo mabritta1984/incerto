@@ -108,7 +108,7 @@ class TesteSemBanco(Base):
         with io.open(self.state, encoding="utf-8", newline="") as f:
             bruto = f.read()
         self.assertNotIn("\r", bruto)
-        self.assertEqual(json.loads(bruto), {"gravadas": sorted(json.loads(bruto)["gravadas"])})
+        self.assertEqual(json.loads(bruto), {"corpus": PARTICAO, "gravadas": sorted(json.loads(bruto)["gravadas"])})
         self.assertIn("Tópico 0", bruto)                            # ensure_ascii=False
 
     def test_cabecalho_entra_no_vetor_mas_o_no_guarda_so_o_texto(self):
@@ -133,6 +133,27 @@ class TesteSemBanco(Base):
                 ING.main(["--entrada", caminho, "--corpus", PARTICAO])
         self.assertEqual(self.vertex.textos, [])
 
+    def test_state_de_outro_corpus_e_recusado_e_state_novo_grava(self):
+        self.calar(ING.ingerir, CRED, "db", [trecho(0)], PARTICAO, self.state)
+        self.vertex.textos.clear(); n = len(self.escritas)
+        with self.assertRaises(ValueError) as ctx:
+            self.calar(ING.ingerir, CRED, "db", [trecho(0, corpus="incerto")], "incerto", self.state)
+        self.assertIn(PARTICAO, str(ctx.exception)); self.assertIn("incerto", str(ctx.exception))
+        self.assertIn(self.state, str(ctx.exception))
+        self.assertEqual((self.vertex.textos, len(self.escritas)), ([], n))      # nada embedado nem gravado
+        novo = os.path.join(self.tmp, "outro.json")
+        self.assertEqual(self.calar(ING.ingerir, CRED, "db", [trecho(0, corpus="incerto")], "incerto", novo)[0], 1)
+        self.assertEqual(len(self.escritas), n + 1)
+
+    def test_state_legado_sem_corpus_e_recusado_antes_da_rede(self):
+        os.makedirs(os.path.dirname(self.state))
+        with io.open(self.state, "w", encoding="utf-8") as f:
+            json.dump({"gravadas": []}, f)
+        caminho = os.path.join(self.tmp, "t.jsonl"); escrever_jsonl(caminho, [trecho(0)])
+        with mock.patch.object(NUC, "abrir_banco", side_effect=AssertionError("rede")):
+            with self.assertRaises(ValueError):
+                ING.main(["--entrada", caminho, "--corpus", PARTICAO, "--state", self.state])
+
     def test_corpus_divergente_do_argumento_e_recusado(self):
         caminho = os.path.join(self.tmp, "t.jsonl")
         escrever_jsonl(caminho, [trecho(0, corpus="incerto")])
@@ -143,7 +164,7 @@ class TesteSemBanco(Base):
         with mock.patch.object(NUC, "embed_gemini", return_value=([None, [0.0] * NUC.GEMINI_DIM], 0)):
             agora, recusadas = self.calar(ING.ingerir, CRED, "db", [trecho(0), trecho(1)], PARTICAO, self.state)
         self.assertEqual((agora, len(recusadas)), (1, 1))
-        self.assertEqual(len(ING.ler_state(self.state)), 1)
+        self.assertEqual(len(ING.ler_state(self.state, PARTICAO)), 1)
 
 
 class TesteVerificar(unittest.TestCase):

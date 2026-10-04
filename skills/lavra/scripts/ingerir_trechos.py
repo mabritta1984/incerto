@@ -8,7 +8,7 @@ e a aresta `(t)-[:PERTENCE_A]->(d)`. Parte ≥2 de tópico partido traz `cabecal
 `cabecalho + "\\n" + texto`, mas o nó guarda só o `texto` (verbatim) e, quando presentes, `junta` e `cabecalho`.
 
 Idempotência: MERGE pela chave `{corpus, documento, topico, parte}`; reexecutar não duplica. Retomada: o
-state (`{"gravadas": [chaves ordenadas]}`) é regravado após cada lote; chaves nele não são re-embedadas.
+state (`{"corpus": ..., "gravadas": [chaves ordenadas]}`; de outro corpus é recusado) é regravado após cada lote; chaves nele não são re-embedadas.
 Toda linha deve trazer `corpus` igual a `--corpus` (default `incerto`): senão ValueError antes de qualquer
 chamada de rede. Só este script (e `aprovar_onda.py`) escreve no grafo.
 
@@ -91,17 +91,23 @@ def texto_para_embedding(linha):
     return linha["cabecalho"] + "\n" + linha["texto"] if linha.get("cabecalho") else linha["texto"]
 
 
-def ler_state(caminho):
+def ler_state(caminho, corpus):
+    """Chaves já gravadas. State de outro corpus (ou legado, sem `corpus`) é recusado: reaproveitá-lo
+    pularia tudo em silêncio, ignorá-lo sobrescreveria o state alheio."""
     if not caminho or not os.path.exists(caminho):
         return set()
     with io.open(caminho, encoding="utf-8") as f:
-        return set(json.load(f).get("gravadas") or [])
+        dados = json.load(f)
+    if dados.get("corpus") != corpus:
+        raise ValueError("state %s é do corpus %r, não de --corpus %r — use outro --state"
+                         % (caminho, dados.get("corpus"), corpus))
+    return set(dados.get("gravadas") or [])
 
 
-def gravar_state(caminho, gravadas):
+def gravar_state(caminho, gravadas, corpus):
     os.makedirs(os.path.dirname(os.path.abspath(caminho)), exist_ok=True)
     with io.open(caminho, "w", encoding="utf-8", newline="\n") as f:
-        json.dump({"gravadas": sorted(gravadas)}, f, sort_keys=True, ensure_ascii=False)
+        json.dump({"corpus": corpus, "gravadas": sorted(gravadas)}, f, sort_keys=True, ensure_ascii=False)
         f.write("\n")
 
 
@@ -113,7 +119,7 @@ def garantir_indices(cred, db):
 def ingerir(cred, db, linhas, corpus, caminho_state, saida=print):
     """Grava `linhas` (já validadas) em lotes de LOTE. Devolve (gravadas_agora, recusadas): `recusadas` são
     trechos acima do limite do modelo — nunca truncados, ficam fora do state para nova tentativa."""
-    gravadas = ler_state(caminho_state)
+    gravadas = ler_state(caminho_state, corpus)
     pendentes = [l for l in linhas if chave_trecho(l) not in gravadas]
     saida("%d trecho(s): %d já no state, %d a gravar" % (len(linhas), len(linhas) - len(pendentes), len(pendentes)))
     if not pendentes:
@@ -138,7 +144,7 @@ def ingerir(cred, db, linhas, corpus, caminho_state, saida=print):
         if linhas_db:
             nucleo.query_com_retentativa(cred, db, CYPHER_GRAVAR, {"corpus": corpus, "linhas": linhas_db})
             gravadas.update(chaves)
-            gravar_state(caminho_state, gravadas)
+            gravar_state(caminho_state, gravadas, corpus)
             agora += len(linhas_db)
         saida("lote %d: %d gravado(s)" % (i // LOTE + 1, len(linhas_db)))
     return agora, recusadas
@@ -188,13 +194,15 @@ def main(argv=None):
     if not a.verificar and not a.entrada:
         ap.error("--entrada é obrigatório (exceto com --verificar)")
     linhas = ler_trechos(a.entrada, a.corpus) if a.entrada else []      # ValueError antes de qualquer rede
-    cred, db, _consultar = nucleo.abrir_banco(a.database)
     if a.verificar:
+        cred, db, _consultar = nucleo.abrir_banco(a.database)
         return 0 if verificar(cred, db, a.corpus) else 1
     ondas = sorted({l["onda"] for l in linhas})
     if not a.state and len(ondas) != 1:
         ap.error("--state é obrigatório quando a entrada não tem exatamente uma onda (%s)" % ", ".join(ondas))
     state = a.state or os.path.join("_esteira", "incerto", "ingestao-%s.json" % ondas[0])
+    ler_state(state, a.corpus)                                          # ValueError antes de qualquer rede
+    cred, db, _consultar = nucleo.abrir_banco(a.database)
     _n, recusadas = ingerir(cred, db, linhas, a.corpus, state)
     return 1 if recusadas else 0
 
