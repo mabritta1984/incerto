@@ -116,48 +116,6 @@ class TesteDesambiguacao(unittest.TestCase):
         self.assertEqual([c["topico"] for c in chunks], ["(abertura)", "A", "B"])
 
 
-class TesteSemDivisao(unittest.TestCase):
-    def test_maxlen_zero_nao_parte(self):
-        self.assertEqual([p for _, p in REC.split_topic("p1\n\np2\n\n" + "x" * 50000, 0)], ["p1\n\np2\n\n" + "x" * 50000])
-    def test_maxlen_positivo_continua_partindo(self):
-        self.assertEqual(len(REC.split_topic("a" * 10 + "\n\n" + "b" * 10, 12)), 2)
-    def test_ordem_e_alertas(self):
-        texto = "# T\n\nabertura\n\n## A\n\ncurto\n\n## B\n\n" + "y" * 40000
-        chunks, alertas = REC.recortar_texto(texto, nivel=2, maxlen=0, alerta_chars=32000, teto_chars=120000)
-        self.assertEqual([c["ordem"] for c in chunks], [1, 2, 3])
-        self.assertEqual([c["parte"] for c in chunks], [1, 1, 1])
-        self.assertEqual(len(alertas), 1); self.assertIn("B", alertas[0])
-    def test_teto_aborta(self):
-        with self.assertRaises(SystemExit):
-            REC.recortar_texto("## A\n\n" + "z" * 130000, nivel=2, maxlen=0, alerta_chars=32000, teto_chars=120000)
-    def test_titulo_permanece_no_texto(self):
-        chunks, _ = REC.recortar_texto("# T\n\nabertura\n\n## A\n\ncurto\n\n## B\n\nfim", 2, 0, 32000, 120000)
-        self.assertEqual([c["texto"] for c in chunks], ["# T\n\nabertura", "## A\n\ncurto", "## B\n\nfim"])
-
-class TesteDesambiguacao(unittest.TestCase):
-    def test_topico_repetido_ganha_o_titulo_pai(self):
-        # Book.md do Shield: `### Dica` sob "# Clustering" e sob "# Sprint" colidiam na chave.
-        texto = "# Clustering\n\n## Dica\n\nc1\n\n## Dicas\n\nc2\n\n# Sprint\n\n## Dica\n\ns1\n\n## Dicas\n\ns2\n\n## Só aqui\n\nx"
-        chunks, _ = REC.recortar_texto(texto, nivel=2, maxlen=0, alerta_chars=32000, teto_chars=120000)
-        # o segundo `# Sprint` NÃO abre novo "(abertura)": o preâmbulo só existe antes do
-        # primeiro título de nível N; a linha `# Sprint` fica anexada ao bloco anterior, como hoje.
-        self.assertEqual([c["topico"] for c in chunks],
-                         ["(abertura)", "Dica — Clustering", "Dicas — Clustering", "Dica — Sprint", "Dicas — Sprint", "Só aqui"])
-        self.assertEqual([c["ordem"] for c in chunks], [1, 2, 3, 4, 5, 6])
-        # o texto continua verbatim: a linha `## Dica` não muda, só a chave
-        self.assertTrue(chunks[1]["texto"].startswith("## Dica\n"))
-
-    def test_repetido_sem_pai_ganha_numero(self):
-        texto = "## Nota\n\na\n\n## Nota\n\nb"
-        chunks, _ = REC.recortar_texto(texto, nivel=2, maxlen=0, alerta_chars=32000, teto_chars=120000)
-        self.assertEqual([c["topico"] for c in chunks], ["Nota (1)", "Nota (2)"])
-
-    def test_sem_repeticao_nada_muda(self):
-        texto = "# T\n\nabertura\n\n## A\n\ncurto\n\n## B\n\nfim"
-        chunks, _ = REC.recortar_texto(texto, nivel=2, maxlen=0, alerta_chars=32000, teto_chars=120000)
-        self.assertEqual([c["topico"] for c in chunks], ["(abertura)", "A", "B"])
-
-
 class TesteRecorteDaOnda(Corpus):
     def test_topico_e_fatia_verbatim_do_original(self):
         original = ler(os.path.join(FIXTURE, GUAN))
@@ -238,8 +196,6 @@ class TesteEquacaoDisplay(unittest.TestCase):
              "\\frac{x}{y} = z\n$$\n\ndepois do bloco\n\nfim")
 
     def test_equacao_display_nao_e_partida(self):
-        ini = self.CORPO.index("$$")
-        fim = self.CORPO.index("$$", ini + 2) + 2
         for maxlen in range(30, len(self.CORPO)):
             pares = REC.split_topic(self.CORPO, maxlen)
             self.assertEqual("".join(j + p for j, p in pares), self.CORPO)
