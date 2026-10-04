@@ -32,7 +32,8 @@ SymPy verde **e** a prova Wolfram verde e concordante. Divergência entre as via
 duas saídas no relato; prova vermelha é pauta da rodada, não bloqueio silencioso.
 
 **Wolfram pelo agente.** A via Wolfram é executada pelo agente, com as ferramentas MCP do Wolfram, e o
-resultado é registrado na prova. Nenhum script do plugin chama o Wolfram nem a rede por conta própria.
+resultado é registrado na prova. Nenhum script chama o Wolfram; a rede só é tocada pelos hosts de Dados
+BR, pelo Vertex e pelo Neo4j.
 
 **Dados BR.** Séries do mercado brasileiro só dos hosts `api.bcb.gov.br` e `bvmf.bmfbovespa.com.br`,
 com cache em `dados/`. Testes **nunca** tocam a rede.

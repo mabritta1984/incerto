@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# copiado de mabritta1984/Lastro@1676115 jazida/build/testes/teste_esqueleto.py
 """Incerto T1: manifesto, marketplace, regras de dono único e injetor em sincronia."""
 import glob
 import json

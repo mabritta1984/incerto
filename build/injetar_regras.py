@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# copiado de mabritta1984/Lastro@1676115 build/injetar_regras.py
 """Injeta blocos de dono único nos arquivos que os consomem.
 
 Por que este script existe

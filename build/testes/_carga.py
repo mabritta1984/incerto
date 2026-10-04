@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# copiado de mabritta1984/Lastro@1676115 jazida/build/testes/_carga.py
 """Carga de módulo do Incerto por caminho (adaptado de jazida/build/testes/_carga.py, copiado de
 mabritta1984/Lastro@1676115). A raiz é o repositório; nada fora dele é carregado."""
 import importlib.util, os, sys
