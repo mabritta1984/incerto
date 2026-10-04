@@ -17,6 +17,8 @@ e caudas gordas. O veredito do especialista nunca é recomendação de ativo.
 | `.claude-plugin/marketplace.json` | marketplace com uma entrada, `source: ./` |
 | `regras-do-incerto.md` | regras comuns, dono único do bloco injetado abaixo |
 | `build/injetar_regras.py` | injetor de blocos de dono único (reuso direto do Lastro) |
+| `skills/lavra/references/extracao-nuvem.md` | contrato de extração na nuvem (layout do bucket, portão do PO), dono único |
+| `skills/lavra/scripts/conferir_onda.py` | portão do PO: relatório de fidelidade e aprovação de uma onda do `mineiro` |
 | `build/testes/` | testes; `_carga.py` carrega módulos por caminho relativo à raiz |
 | `dados/` | cache dos dados BR (conteúdo fora do git) |
 | `docs/superpowers/` | spec e plano |
