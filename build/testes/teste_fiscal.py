@@ -74,6 +74,23 @@ class TesteEquivalente(unittest.TestCase):
         self.assertEqual(equivalente(srepr_de(r"y = \pi x"), srepr_de(r"x = \frac{y}{e}"), "x", {})["veredito"],
                          "vermelho")
 
+    def test_p2_filha_que_escolhe_um_ramo_e_indeterminado(self):
+        mae = srepr_de("y = x^{2}")
+        for filha in (r"x = \sqrt{y}", r"x = -\sqrt{y}"):
+            r = equivalente(mae, srepr_de(filha), "x", {})
+            self.assertEqual(r["veredito"], "indeterminado", filha)
+            self.assertIn("filha escolhe um ramo (1 de 2)", r["detalhe"])
+            self.assertIn("sqrt(y)", r["detalhe"]); self.assertIn("-sqrt(y)", r["detalhe"])
+        r = equivalente(srepr_de("x^{2} - 3 x + 2 = 0"), srepr_de("x = 2"), "x", {})
+        self.assertEqual(r["veredito"], "indeterminado"); self.assertIn("(1 de 2)", r["detalhe"])
+
+    def test_p2_lambda_na_substituicao(self):
+        mae, filha = srepr_de(r"y = \lambda x"), srepr_de(r"x = \frac{y}{2 \mu}")
+        self.assertEqual(equivalente(mae, filha, "x", {})["veredito"], "vermelho")
+        self.assertEqual(equivalente(mae, filha, "x", {"lambda": "2*mu"})["veredito"], "verde")
+        filha_l = srepr_de(r"x = \frac{y}{\lambda}")
+        self.assertEqual(equivalente(srepr_de(r"y = k x"), filha_l, "x", {"k": "lambda"})["veredito"], "verde")
+
     def test_p2_substituicao_ilegivel_e_indeterminado(self):
         self.assertEqual(equivalente(self.mae_kelly, self.filha_kelly, "f", {"b": "(("})["veredito"], "indeterminado")
 
@@ -97,6 +114,11 @@ class TesteRelacional(unittest.TestCase):
         self.assertFalse(relacional_parseia("0 < alpha < 1", ["alpha"]))
         self.assertFalse(relacional_parseia("g(alpha) > 1", ["alpha"]))
         self.assertTrue(relacional_parseia("log(alpha) > 1", ["alpha"]))
+
+    def test_lambda_e_simbolo(self):
+        self.assertTrue(relacional_parseia("lambda > 0", ["lambda", "x"]))
+        self.assertTrue(relacional_parseia("lambda > 0 or x < lambda", ["lambda", "x"]))
+        self.assertFalse(relacional_parseia("lambda > 0", ["x"]))
 
     def test_pi_e_e_sao_simbolos(self):
         self.assertTrue(relacional_parseia("x > pi", ["x", "pi"]))
@@ -125,6 +147,21 @@ class TesteProvas(unittest.TestCase):
                           ("P3", "kelly#2", "verde"), ("P3", "kelly#2", "vermelho"), ("P3", "nada#9", "vermelho")])
         self.assertIn("equação desconhecida", linhas[-1]["detalhe"])
         self.assertTrue(all(isinstance(l["ms"], int) for l in linhas))
+
+    def test_linhas_distinguiveis_por_chaves_estruturadas(self):
+        eqs = [self.cand("a#1", "R = M/S"), self.cand("a#2", "R = M/S + 0"), self.cand("a#3", "S = M/R")]
+        ders = [{"filha": "a#3", "mae": "a#1", "alvo": "S", "substituicao": {}},
+                {"filha": "a#3", "mae": "a#2", "alvo": "S", "substituicao": {"M": "M"}}]
+        vals = [{"equacao": "a#3", "condicao": "M > 0"}, {"equacao": "a#3", "condicao": "R > 0"}]
+        linhas = provas_sympy(eqs, ders, vals)
+        p1 = [l for l in linhas if l["prova"] == "P1"]
+        p2 = [l for l in linhas if l["prova"] == "P2"]
+        p3 = [l for l in linhas if l["prova"] == "P3"]
+        self.assertEqual([l["equacao"] for l in p1], ["a#1", "a#2", "a#3"])
+        self.assertEqual([(l["mae"], l["filha"], l["simbolo"], l["substituicao"]) for l in p2],
+                         [("a#1", "a#3", "S", {}), ("a#2", "a#3", "S", {"M": "M"})])
+        self.assertEqual([(l["equacao"], l["condicao"]) for l in p3], [("a#3", "M > 0"), ("a#3", "R > 0")])
+        self.assertTrue(all(l["alvo"] == "a#3" for l in p2 + p3))     # `alvo` mantido por compatibilidade
 
     def test_p2_equacao_desconhecida_ou_sem_srepr_e_vermelho(self):
         eqs = [self.cand("a#1", "R = M/S"), {"nome": "a#2", "latex": r"\Pr(X)", "srepr": None, "simbolos": []}]
@@ -174,7 +211,9 @@ class TesteCli(unittest.TestCase):
         self.rodar(); primeiro = self.ler("fiscal-%s.jsonl" % ONDA)
         self.rodar(); self.assertEqual(self.ler("fiscal-%s.jsonl" % ONDA), primeiro)
         linhas = [json.loads(l) for l in primeiro.splitlines()]
-        self.assertEqual([sorted(l) for l in linhas], [["alvo", "detalhe", "prova", "veredito"]] * 4)
+        self.assertEqual([sorted(l) for l in linhas],
+                         [["alvo", "detalhe", "equacao", "prova", "veredito"]] * 3
+                         + [["alvo", "detalhe", "filha", "mae", "prova", "simbolo", "substituicao", "veredito"]])
         self.assertEqual([l["veredito"] for l in linhas], ["verde", "verde", "vermelho", "verde"])
         for l in primeiro.splitlines():
             self.assertEqual(l, json.dumps(json.loads(l), sort_keys=True, ensure_ascii=False))

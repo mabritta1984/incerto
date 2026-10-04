@@ -3,6 +3,10 @@
 """Fiscal algébrico da onda: nada sai de staging sem ele, e prova vermelha nunca promove.
 
 Provas (uma linha por prova; `prova`, `alvo`, `veredito` ∈ verde|vermelho|indeterminado, `detalhe`, `ms`):
+  Chaves estruturadas por prova (além de `alvo`, mantido por compatibilidade): P1 `equacao`; P2 `mae`,
+  `filha`, `simbolo` (o símbolo isolado — o `alvo` da linha de derivação), `substituicao` (como declarada);
+  P3 `equacao`, `condicao`. São elas que distinguem duas derivações da mesma filha ou duas condições da
+  mesma equação.
   P1 parse     — todo candidato de `equacoes-<onda>.jsonl`: `srepr` presente → verde; `srepr` nulo →
                  vermelho com o LaTeX e o motivo da perda no `detalhe`. `alvo` = nome da equação.
   P2 derivação — toda linha de `derivacoes-<onda>.jsonl` (`{"filha", "mae", "alvo", "substituicao",
@@ -16,14 +20,17 @@ não é usado.
 `equivalente`: os `srepr` viram expressão por `sympy.sympify`; a `substituicao` ({símbolo: expressão em
 sintaxe SymPy}) é aplicada aos dois lados; a filha tem de ser `Equality` com lado esquerdo exatamente
 `Symbol(alvo)` e a mãe uma `Equality` que contenha `alvo`; `solve(mae, alvo)`; alguma solução com
-`simplify(sol - filha.rhs) == 0` → verde; soluções, mas nenhuma igual → vermelho (as soluções no
+`simplify(sol - filha.rhs) == 0` → verde se for a única solução, e indeterminado ("filha escolhe um
+ramo (k de n)", k = soluções iguais à filha, n = soluções) se houver mais de uma;
+soluções, mas nenhuma igual → vermelho (as soluções no
 `detalhe`); nenhuma solução ou SymPy sem resposta → indeterminado. Não há timeout portável: só `solve`
 e `simplify`, nada mais caro.
 
 `relacional_parseia`: a estrutura booleana é lida pelo `ast` do Python — `and`/`or`/`not` (e `&`, `|`,
 `~` com os operandos entre parênteses) combinam condições; cada comparação simples (`a > b`, `<`, `>=`,
 `<=`, `==`, `!=`; comparação encadeada não) é lida por `parse_expr(..., evaluate=False)` com todo nome
-que não é chamada como `Symbol` (`pi`, `e`, `E` continuam símbolos, como na extração). Toda comparação
+que não é chamada como `Symbol` (`pi`, `e`, `E` continuam símbolos, como na extração; o token `lambda`,
+palavra reservada do Python, é renomeado antes do parse e volta como `Symbol('lambda')`). Toda comparação
 tem de ter símbolo livre (constante `1 > 0`, `True` não são condição) e todo símbolo livre tem de estar
 entre os símbolos da equação; função não definida no SymPy (`g(x)`) não é aceita.
 
@@ -44,6 +51,7 @@ import json
 import os
 import sys
 import time
+import tokenize
 
 import recortar_trechos   # vizinho em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
 
@@ -55,14 +63,30 @@ def _ordenado(exprs):
     return sorted(exprs, key=default_sort_key)
 
 
+# `\lambda` vira `Symbol('lambda')` na extração, mas `lambda` é palavra reservada do Python: o token NAME
+# `lambda` é trocado por este nome antes do `ast`/`parse_expr` e lido de volta como `Symbol('lambda')`
+LAMBDA = "QZlambdaQZ"
+
+
+def _sem_lambda(texto):
+    tokens = list(tokenize.generate_tokens(io.StringIO(texto).readline))
+    if not any(t.type == tokenize.NAME and t.string == "lambda" for t in tokens):
+        return texto
+    if LAMBDA in texto:
+        raise ValueError("o texto já contém %s" % LAMBDA)
+    return tokenize.untokenize((t.type, LAMBDA if t.type == tokenize.NAME and t.string == "lambda" else t.string)
+                               for t in tokens).strip()
+
+
 def _expressao(texto):
-    """Expressão em sintaxe SymPy com todo nome não chamado como símbolo (`pi` e `e` inclusive)."""
+    """Expressão em sintaxe SymPy com todo nome não chamado como símbolo (`pi`, `e` e `lambda` inclusive)."""
     from sympy import Symbol
     from sympy.parsing.sympy_parser import parse_expr
+    texto = _sem_lambda(texto)
     arvore = ast.parse(texto, mode="eval")
     chamados = {id(n.func) for n in ast.walk(arvore) if isinstance(n, ast.Call)}
     nomes = {n.id for n in ast.walk(arvore) if isinstance(n, ast.Name) and id(n) not in chamados}
-    return parse_expr(texto, {nome: Symbol(nome) for nome in nomes}, evaluate=False)
+    return parse_expr(texto, {nome: Symbol("lambda" if nome == LAMBDA else nome) for nome in nomes}, evaluate=False)
 
 
 def equivalente(mae_srepr, filha_srepr, alvo, substituicao):
@@ -106,6 +130,9 @@ def equivalente(mae_srepr, filha_srepr, alvo, substituicao):
         iguais = [s for s in solucoes if simplify(s - rhs) == 0]
     except Exception as e:
         return resultado(INDETERMINADO, "simplify sem resposta: %s" % type(e).__name__)
+    if iguais and len(solucoes) > 1:
+        # `y = x^2` → `x = sqrt(y)`: a filha escolheu um ramo; a escolha precisa de hipótese, não é derivação pura
+        return resultado(INDETERMINADO, "filha escolhe um ramo (%d de %d): %s" % (len(iguais), len(solucoes), lista))
     if iguais:
         return resultado(VERDE, "%s = %s" % (alvo, sstr(iguais[0])))
     return resultado(VERMELHO, "a mãe dá %s; a filha diz %s = %s" % (lista, alvo, sstr(rhs)))
@@ -143,7 +170,7 @@ def relacional_parseia(condicao, simbolos):
         return False
 
     try:
-        return valida(ast.parse(condicao.strip(), mode="eval").body)
+        return valida(ast.parse(_sem_lambda(condicao.strip()), mode="eval").body)
     except Exception:
         return False
 
@@ -153,9 +180,9 @@ def relacional_parseia(condicao, simbolos):
 def _p1_parse(ctx):
     for eq in ctx["equacoes"]:
         if eq.get("srepr"):
-            yield {"alvo": eq["nome"], "veredito": VERDE, "detalhe": "srepr presente"}
+            yield {"alvo": eq["nome"], "equacao": eq["nome"], "veredito": VERDE, "detalhe": "srepr presente"}
         else:
-            yield {"alvo": eq["nome"], "veredito": VERMELHO,
+            yield {"alvo": eq["nome"], "equacao": eq["nome"], "veredito": VERMELHO,
                    "detalhe": "sem srepr (%s) — LaTeX: %s" % (eq.get("motivo") or "motivo ausente", eq.get("latex"))}
 
 
@@ -163,31 +190,32 @@ def _p2_derivacao(ctx):
     por_nome = ctx["por_nome"]
     for d in ctx["derivacoes"]:
         filha, mae, alvo = d.get("filha"), d.get("mae"), d.get("alvo")
+        chaves = {"alvo": filha, "mae": mae, "filha": filha, "simbolo": alvo, "substituicao": d.get("substituicao") or {}}
         desconhecidas = [n for n in (mae, filha) if n not in por_nome]
         if desconhecidas:
-            yield {"alvo": filha, "veredito": VERMELHO,
-                   "detalhe": "equação desconhecida: %s" % ", ".join(str(n) for n in desconhecidas)}
+            yield dict(chaves, veredito=VERMELHO,
+                       detalhe="equação desconhecida: %s" % ", ".join(str(n) for n in desconhecidas))
             continue
         sem = [n for n in (mae, filha) if not por_nome[n].get("srepr")]
         if sem:
-            yield {"alvo": filha, "veredito": VERMELHO, "detalhe": "sem srepr: %s" % ", ".join(sem)}
+            yield dict(chaves, veredito=VERMELHO, detalhe="sem srepr: %s" % ", ".join(sem))
             continue
         r = equivalente(por_nome[mae]["srepr"], por_nome[filha]["srepr"], alvo, d.get("substituicao") or {})
-        yield {"alvo": filha, "veredito": r["veredito"],
-               "detalhe": "de %s por %s: %s" % (mae, alvo, r["detalhe"])}
+        yield dict(chaves, veredito=r["veredito"], detalhe="de %s por %s: %s" % (mae, alvo, r["detalhe"]))
 
 
 def _p3_validade(ctx):
     por_nome = ctx["por_nome"]
     for v in ctx["validades"]:
         nome, condicao = v.get("equacao"), v.get("condicao")
+        chaves = {"alvo": nome, "equacao": nome, "condicao": condicao}
         if nome not in por_nome:
-            yield {"alvo": nome, "veredito": VERMELHO, "detalhe": "equação desconhecida: %s" % nome}
+            yield dict(chaves, veredito=VERMELHO, detalhe="equação desconhecida: %s" % nome)
             continue
         ok = isinstance(condicao, str) and relacional_parseia(condicao, por_nome[nome].get("simbolos") or [])
-        yield {"alvo": nome, "veredito": VERDE if ok else VERMELHO,
-               "detalhe": ("condição %s" if ok else "condição não é relacional sobre os símbolos da equação: %s")
-               % condicao}
+        yield dict(chaves, veredito=VERDE if ok else VERMELHO,
+                   detalhe=("condição %s" if ok else "condição não é relacional sobre os símbolos da equação: %s")
+                   % condicao)
 
 
 PROVAS = (("P1", _p1_parse), ("P2", _p2_derivacao), ("P3", _p3_validade))
