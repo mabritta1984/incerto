@@ -1,0 +1,62 @@
+# copiado de mabritta1984/Lastro@1676115 .github/workflows/testes.yml
+# CI do Incerto. Roda a cada push e PR, sem segredo: os testes que precisam de banco real (@precisa_neo4j)
+# usam o service container neo4j:5 abaixo, nunca o AuraDB do corpus.
+name: testes
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    services:
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/senha-de-teste-ci   # Query API ligada por padrão no 5.26 (conferido em 27/09)
+        ports:
+          - 7474:7474
+          - 7687:7687
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONIOENCODING: utf-8
+      NEO4J_TESTE_URI: http://localhost:7474
+      NEO4J_TESTE_USUARIO: neo4j
+      NEO4J_TESTE_SENHA: senha-de-teste-ci
+      NEO4J_TESTE_DATABASE: neo4j
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Requisitos pinados
+        run: python -m pip install -r build/requisitos.txt
+
+      - name: Espera a Query API do neo4j:5
+        run: |
+          for i in $(seq 1 45); do
+            codigo=$(curl -s -o /dev/null -w "%{http_code}" -u neo4j:senha-de-teste-ci \
+              -H "Content-Type: application/json" -d '{"statement":"RETURN 1"}' \
+              http://localhost:7474/db/neo4j/query/v2 || true)
+            if [ "$codigo" = "202" ] || [ "$codigo" = "200" ]; then echo "Query API pronta (HTTP $codigo)"; exit 0; fi
+            sleep 2
+          done
+          echo "Query API do service container não respondeu (último HTTP: $codigo)"; exit 1
+
+      - name: Verificador frio — build/verificar_incerto.py
+        if: ${{ !cancelled() }}
+        run: python -B build/verificar_incerto.py
+
+      - name: unittest (com @precisa_neo4j contra o service container)
+        if: ${{ !cancelled() }}
+        run: python -B -W error::ResourceWarning -m unittest discover -s build/testes -t build/testes -p "teste_*.py" -v
