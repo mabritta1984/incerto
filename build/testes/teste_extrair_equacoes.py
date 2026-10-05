@@ -89,6 +89,24 @@ class TesteParse(unittest.TestCase):
             r = parsear_latex(latex)
             self.assertFalse(r["ok"], latex); self.assertEqual(r["motivo"], "nao_suportado:" + f, latex)
 
+    def test_leituras_erradas_em_silencio_sao_perda(self):
+        # I1: o SymPy lia estas com ok:true e um srepr errado — `C_n^k` como Pow(C_n, k), `\{x\}` como x,
+        # `x^{(n)}` como x**n, `\Delta x` como Delta*x
+        casos = {r"y = C_n^k p^k": "nao_suportado:_{…}^", r"y = x_{i}^{2}": "nao_suportado:_{…}^",
+                 r"y = T_{max}^2": "nao_suportado:_{…}^", r"y = \sigma_\alpha^2": "nao_suportado:_{…}^",
+                 r"r = \{x\}": "nao_suportado:\\{", r"r = \left\{x\right\}": "nao_suportado:\\{",
+                 r"S = x^{(n)} + y": "nao_suportado:^{(", r"S = x^{ ( n ) }": "nao_suportado:^{(",
+                 r"\Delta x = 2": "nao_suportado:\\Delta", r"y = \Delta\alpha": "nao_suportado:\\Delta",
+                 r"y = \Delta t": "nao_suportado:\\Delta"}
+        for latex, motivo in casos.items():
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertIsNone(r["srepr"], latex)
+            self.assertEqual(r["motivo"], motivo, latex)
+        # o que não é nenhum dos quatro continua parseável
+        for latex in (r"y = x^{2} + C_n", r"\Delta = 2", r"y = \Delta + 1", r"y = x^{n}", r"y = (x)^{2}",
+                      r"y = \Delta_t"):
+            self.assertTrue(parsear_latex(latex)["ok"], latex)
+
     def test_decoracoes_sao_perda(self):
         # `\overline{x}` → conjugate(x) em strict; as outras viram operação ou símbolo falso
         for cmd in ("overline", "underline", "widehat", "widetilde", "hat", "bar", "tilde", "check", "breve",

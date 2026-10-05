@@ -16,7 +16,10 @@ documentos e são pulados.
      `\\mathit{TC}` → `TC`, `x_{1}` → `x_1`); `\\mathbb{E}[X]` e `E[X]` → `E(X)`; `\\operatorname{Var}(X)` →
      função `Var`. Sequência de letras sem marcação (`TC`) NÃO é normalizada: não há como saber se é `T·C`;
      também são perda, por ambíguas: expoente seguido de `_` ou `(` (`x^{2}_{i}`, `f^{-1}(x)`), letra
-     seguida de `[` e decorações (`\\overline`, `\\hat`, …);
+     seguida de `[` e decorações (`\\overline`, `\\hat`, …); e, porque o SymPy os lê errado com `ok`,
+     símbolo com subscrito seguido de `^` (`C_n^k` → Pow(C_n, k): `_{…}^`), chaves de conjunto `\\{…\\}` (e
+     `\\left\\{…\\right\\}`, lidas como `x`), `^{(…)}` (lido como potência) e `\\Delta` seguido de letra
+     (`\\Delta x` lido como `Delta·x`);
   3. `sympy.parsing.latex.parse_latex(..., strict=True)`; erro é perda `strict`;
   4. conferência: todo símbolo e toda função do resultado têm de ser um token inteiro do LaTeX
      normalizado (`TC` lido como `T·C` é `simbolo_partido:TC`); símbolo com nome de comando LaTeX
@@ -44,6 +47,10 @@ import recortar_trechos   # vizinho em skills/lavra/scripts/: a pasta do script 
 
 CORPUS = "incerto"
 
+GREGAS = ("alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda mu nu xi pi "
+          "rho sigma tau upsilon phi varphi chi psi omega Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi "
+          "Psi Omega").split()
+
 # Perda declarada antes do parse: (regex no LaTeX de origem). O motivo é `nao_suportado:<o que casou>`.
 NAO_SUPORTADOS = (
     r"\\Pr(?![A-Za-z])",
@@ -57,14 +64,18 @@ NAO_SUPORTADOS = (
     # decorações: o SymPy as lê como operações (`\overline{x}` → conjugate(x)) ou como símbolos falsos
     r"\\(?:overline|underline|widehat|widetilde|hat|bar|tilde|check|breve|dot|ddot|vec|acute|grave|mathring|"
     r"overrightarrow|overleftarrow|underbrace|overbrace)(?![A-Za-z])",
+    # leituras erradas em silêncio (o parse dava ok): `\{x\}` (chaves de conjunto, parte fracionária) vira `x`;
+    # `x^{(n)}` (potência ascendente, n-ésima derivada) vira `x**n`; `\Delta x` (incremento) vira `Delta*x`
+    r"\\\{",
+    r"\^\s*\{\s*\(",
+    r"\\Delta(?=\s*(?:[A-Za-z]|\\(?:%s)(?![A-Za-z])))" % "|".join(GREGAS),
 )
+# símbolo com subscrito seguido de `^` (`C_n^k`, binomial; `x_{i}^{2}`): o SymPy lê Pow(C_n, k) — perda
+_SUBSCRITO_E_EXPOENTE = r"_\s*(?:\{[^{}]*\}|\\[A-Za-z]+|[A-Za-z0-9])\s*\^"
 # Marcação que sobrou depois da normalização: o parser a leria como símbolo (`Symbol('mathrm')`).
 RESIDUAIS = r"\\(?:mathbb|mathrm|mathit|mathbf|mathcal|mathsf|boldsymbol|operatorname|text|textrm|mbox)(?![A-Za-z])"
 COMANDOS_COMO_SIMBOLO = frozenset(("mathbb", "mathrm", "mathit", "mathbf", "mathcal", "operatorname", "text",
                                    "tag", "label", "dots", "cdots", "ldots", "vdots", "left", "right"))
-GREGAS = ("alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda mu nu xi pi "
-          "rho sigma tau upsilon phi varphi chi psi omega Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi "
-          "Psi Omega").split()
 _GREGA = r"\\(?:%s)(?![A-Za-z])" % "|".join(GREGAS)
 _BASE = r"(?:(?<![A-Za-z\\])[A-Za-z]|%s)" % _GREGA           # uma letra solta ou uma letra grega
 _SEM_LEITURA = (
@@ -167,6 +178,8 @@ def _preparar(latex):
     if seguinte:
         # `x^{2}_{i}`: o SymPy descarta o subscrito; `f^{-1}(x)`: inversa lida como produto
         return None, [], "nao_suportado:^{…}%s" % seguinte
+    if re.search(_SUBSCRITO_E_EXPOENTE, latex):
+        return None, [], "nao_suportado:_{…}^"
     m = re.search(RESIDUAIS, _RE_MARCA.sub(" ", t))
     if m:
         return None, [], "nao_suportado:%s" % m.group(0)
