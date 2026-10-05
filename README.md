@@ -17,6 +17,8 @@ e caudas gordas. O veredito do especialista nunca é recomendação de ativo.
 | `.claude-plugin/marketplace.json` | marketplace com uma entrada, `source: ./` |
 | `regras-do-incerto.md` | regras comuns, dono único do bloco injetado abaixo |
 | `build/injetar_regras.py` | injetor de blocos de dono único (reuso direto do Lastro) |
+| `skills/lavra/SKILL.md` | estação `lavra`: rito por onda em oito passos (copiar originais, conversão, portão, recorte/ingestão/extração, momentos, fiscal de duas vias, bloco de decisão, aprovação), cada um com comando e parada, e decisão do PO antes de gastar modelo ou escrever no Aura |
+| `skills/lavra/references/devolucao.md` | formato do bloco de decisão único da rodada (renomeações, conceitos, heurísticas, momentos, indeterminados, vermelhos) e a linha JSONL de cada decisão, dono único |
 | `skills/lavra/references/extracao-nuvem.md` | contrato de extração na nuvem (layout do bucket, portão do PO), dono único |
 | `skills/lavra/references/fiscal.md` | protocolo da prova Wolfram do fiscal de duas vias (código, veredito, registro verbatim), dono único |
 | `skills/lavra/scripts/conferir_onda.py` | portão do PO: relatório de fidelidade e aprovação de uma onda do `mineiro` |
