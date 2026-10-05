@@ -53,8 +53,8 @@ derivada leva `origem: 'derivada'` e o script que a gravou. Equação sem fonte 
 
 **Equação é nó; fórmula em texto livre não é.** A forma canônica é o `srepr` do SymPy mais o LaTeX de
 origem. "Parseável" significa `parse_latex(strict=True)`, normalização de símbolos compostos e
-conferência dos símbolos contra o LaTeX; o que falha é ⚠️ com o LaTeX preservado — perda declarada,
-nunca nó.
+conferência dos símbolos contra o LaTeX; o que falha é ⚠️ com o LaTeX preservado — perda declarada fica
+em staging com forma `perda`, nunca aprovada.
 
 **Fiscal de duas vias.** `DERIVA_DE` e `:Equacao` com momento fechado só saem de staging com a prova
 SymPy verde **e** a prova Wolfram verde e concordante. Divergência entre as vias é vermelho, com as

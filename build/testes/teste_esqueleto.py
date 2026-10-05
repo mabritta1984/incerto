@@ -42,6 +42,14 @@ class TesteRegras(unittest.TestCase):
                       "Wolfram", "Sem import cruzado", "Nunca recomendação", "[corpus]"):
             self.assertIn(regra, texto)
 
+    def test_regra_da_perda_e_a_do_gate(self):
+        # M1: a perda declarada vira :Equacao em staging com forma `perda` (aprovar_onda, grafo-incerto.md);
+        # "nunca nó" contradizia o modelo
+        texto = _ler(RAIZ, "regras-do-incerto.md")
+        regra = texto[texto.index("**Equação é nó"):].split("\n\n", 1)[0]
+        self.assertIn("perda declarada fica em staging com forma `perda`, nunca aprovada", " ".join(regra.split()))
+        self.assertNotIn("nunca nó", regra)
+
     def test_readme_consome_as_regras(self):
         self.assertIn("<!-- bloco:regras-do-incerto:inicio (gerado de regras-do-incerto.md",
                       _ler(RAIZ, "README.md"))

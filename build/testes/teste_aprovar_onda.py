@@ -93,6 +93,12 @@ class TesteGateEquacao(unittest.TestCase):
         self.assertEqual(eq["status"], "staging")
         self.assertIn("sem prova P1", eq["pendencias"][0])
 
+    def test_perda_declarada_fica_em_staging_com_forma_perda(self):
+        e = cand("a", r"\Pr(X > x) = x^{-\alpha}")
+        fis = [{k: v for k, v in l.items() if k != "ms"} for l in FI.provas([e], [], [], {})]
+        eq = AO.decidir([e], [], [], fis, [aceite(prova="P1", equacao="a")])["equacoes"][0]
+        self.assertEqual((eq["forma"], eq["status"], eq["latex"]), ("perda", "staging", e["latex"]))
+
     def test_p1_vermelho_fica_em_staging(self):
         eq = AO.decidir([eq_fixa("a")], [], [], [p1("a", "vermelho")], [])["equacoes"][0]
         self.assertEqual(eq["status"], "staging")
