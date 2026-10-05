@@ -16,8 +16,10 @@ Linhas (uma por prova, `json.dumps(sort_keys=True, ensure_ascii=False)`, `newlin
                   pode reprovar uma equação que parseia)
 `veredito` ∈ verde|vermelho|indeterminado, decidido pelo agente segundo `references/fiscal.md` — mas verde é
 conferido: só entra se a última linha `Out[n]=` da saída for exatamente `0` ou uma lista só de `0`
-(`{0, 0}`); saída sem `Out[n]=` ou com outro resultado recusa o verde. Vermelho e indeterminado
-entram como o agente os decidiu.
+(`{0, 0}`); saída sem `Out[n]=` ou com outro resultado recusa o verde. Indeterminado também é conferido: uma
+diferença fechada não nula (sem cabeça não avaliada, sem `$Aborted`/tempo esgotado) é vermelho e o
+indeterminado é recusado. A regra é `fiscal.conferir_veredito_wolfram` (dono único). Vermelho entra como o
+agente o decidiu.
 `impressao` amarra o veredito ao conteúdo provado: é `fiscal.impressao_esperada` (dono único) calculada de
 `<raiz-esteira>/equacoes-<onda>.jsonl` e `derivacoes-<onda>.jsonl` no momento do registro (na prova de
 equação, o `latex` + `srepr` do candidato); derivação não declarada (ou declarada mais de uma vez), equação
@@ -42,7 +44,6 @@ import argparse
 import io
 import json
 import os
-import re
 import sys
 
 import fiscal             # vizinhos em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
@@ -60,26 +61,9 @@ def _ler_verbatim(caminho, rotulo):
     return texto
 
 
-RE_OUT = re.compile(r"^Out\[\d+\]=(.*)$", re.M)
-RE_ZERO = re.compile(r"^(?:0|\{\s*0(?:\s*,\s*0)*\s*\})$")
-
-
-def resultado_wolfram(saida):
-    """O que vem depois do último `Out[n]=` da saída (sem espaços nas pontas), ou None se não houver."""
-    achados = RE_OUT.findall(saida.replace("\r\n", "\n").replace("\r", "\n"))
-    return achados[-1].strip() if achados else None
-
-
-def conferir_veredito(veredito, saida):
-    """`ValueError` se `veredito` é verde e o último `Out[n]=` não é exatamente `0` nem uma lista só de `0`
-    (`{0, 0}`). Vermelho e indeterminado entram como o agente decidiu (`references/fiscal.md`)."""
-    if veredito != fiscal.VERDE:
-        return
-    resultado = resultado_wolfram(saida)
-    if resultado is None or not RE_ZERO.match(resultado):
-        raise ValueError("veredito verde recusado: o último `Out[n]=` da saída é %s, e verde exige exatamente `0` "
-                         "ou uma lista só de `0` (`{0, 0}`) — o veredito é o que a saída diz"
-                         % ("ausente" if resultado is None else repr(resultado)))
+# a regra do veredito tem dono único em `fiscal.py` (vale também na carga das provas)
+resultado_wolfram = fiscal.resultado_wolfram
+conferir_veredito = fiscal.conferir_veredito_wolfram
 
 
 def _linha_json(linha):

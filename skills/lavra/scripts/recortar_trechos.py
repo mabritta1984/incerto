@@ -178,7 +178,8 @@ def recortar_texto(texto, nivel, maxlen, alerta_chars, teto_chars, subtitulo_cha
     dele, até o próximo título de nível ≤ N, é um tópico próprio com o título dessa linha —
     nunca é atribuído ao tópico de cima. Título de nível < N sem corpo (`# Parte` seguido direto
     de `## Cap.`) não vira tópico vazio: entra como prefixo verbatim do próximo bloco. `pai` de
-    um bloco é o título de nível mais alto (número menor) mais próximo acima do seu.
+    um bloco é o título de nível mais alto (número menor) mais próximo acima do seu. Linha dentro de cerca de
+    código (``` ou ~~~) ou de bloco display `$$ … $$` nunca é título.
 
     Devolve (chunks, alertas). chunks: dicts com topico, parte, ordem, texto.
     Tópico acima de `alerta_chars` gera aviso (pauta, não corte); acima de
@@ -186,6 +187,7 @@ def recortar_texto(texto, nivel, maxlen, alerta_chars, teto_chars, subtitulo_cha
     blocos, linhas, titulo, pai_do_bloco = [], [], "(abertura)", None
     so_titulos = False      # o bloco corrente até aqui é só título(s) de nível < N e brancos
     acima = {}              # nível -> título vigente, para achar o `pai`
+    cerca, display = False, False   # dentro de ``` / ~~~ ou de `$$ … $$`: nenhuma linha é título
 
     def fechar_bloco():
         corpo = "".join(linhas).strip()
@@ -193,7 +195,12 @@ def recortar_texto(texto, nivel, maxlen, alerta_chars, teto_chars, subtitulo_cha
             blocos.append((titulo, pai_do_bloco, corpo))
 
     for linha in texto.splitlines(keepends=True):
-        m = re.match(r"^(#{1,6}) (.*)$", linha.rstrip("\n"))
+        protegida = cerca or display
+        if linha.lstrip().startswith(("```", "~~~")) and not display:
+            cerca = not cerca
+        elif not cerca and linha.count("$$") % 2:
+            display = not display
+        m = None if protegida else re.match(r"^(#{1,6}) (.*)$", linha.rstrip("\n"))
         n = len(m.group(1)) if m else 0
         if m and n <= nivel:
             # P-AL: NFC na CAPTURA — desambiguar_topicos monta a chave ("<titulo> — <pai>") a

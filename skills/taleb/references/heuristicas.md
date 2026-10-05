@@ -14,17 +14,22 @@ Símbolos, com a mesma definição do `relatorio.py`:
 
 | Símbolo | O quê | De onde |
 |---|---|---|
-| `kappa` | κ_1 = κ(n0=1, n=2) de Taleb (o κ da eq. 8.8 do SCFT) | `caudas.kappa(xs, 1, 2)`, equação `kappa` |
+| `kappa` | κ_1 = κ(n0=1, n=2) de Taleb (o κ da eq. 8.8 e da Table 8.3 do SCFT), exato para a amostra | `caudas.kappa_1_exato`, intervalo `relatorio.intervalo_kappa_1`, equação `kappa` |
 | `alpha` | α̂ de Hill da cauda esquerda, k = max(10, n//20) | `caudas.hill`, equação `hill` |
 | `H` | assimetria empírica (choque de ±2σ por quantis) | `convexidade.assimetria_empirica`, equação `assimetria_convexidade` |
 | `fracao_segura` | fração da carteira no lado de perda máxima conhecida | `convexidade.barbell` |
 
 Uma condição sobre `H` vale para o **intervalo bootstrap inteiro** de H (o limite superior para `H < 0`, o
 inferior para `H > 0`), como a classe de fragilidade do `relatorio.py`: ruído amostral não dispara
-heurística. Os limiares de domínio (κ_1 > 0,15, α̂ < 2) são os mesmos `LIMIAR_KAPPA` e `LIMIAR_ALFA` do
+heurística. O mesmo vale para `kappa`: κ_1 é o exato da amostra (M(1) e M(2) da distribuição empírica, sem
+Monte Carlo) e `kappa > 0.15` só vale se o limite **inferior** do IC95% bootstrap de κ_1 passa de 0,15;
+`kappa <= 0.15` só se o **superior** fica ≤ 0,15. Intervalo que contém 0,15 é **fronteira**: nenhuma das
+duas vale, e a heurística que depende só de κ não dispara (a que tem `or alpha < 2` ainda pode disparar
+por α̂). Os limiares de domínio (κ_1 > 0,15, α̂ < 2) são os mesmos `LIMIAR_KAPPA` e `LIMIAR_ALFA` do
 `relatorio.py`; mudar um exige mudar o outro. O de κ é do corpus [corpus] — (Statistical_Consequences_of_Fat_Tails.pdf.md,
 8.3.2 Practical significance for sample sufficiency): "Any value of κ above .15 effectively indicates a high
-degree of unreliability of the 'normal approximation'"; conferido no Wolfram, Student T(3) dá κ_1 = 0,2904 e
+degree of unreliability of the 'normal approximation'"; a eq. 8.8 (mesmo tópico) usa κ_1, e a Table 8.3
+(tópico 8.2 THE METRIC) o tabula para Pareto e Student — κ_1 é a quantidade em uso; conferido no Wolfram, Student T(3) dá κ_1 = 0,2904 e
 n_ν = 30^(−1/(κ_1−1)) = 120,7, os "120 observations" do mesmo tópico. O de α̂ é do incerto [externo].
 
 Heurística é diagnóstico de método, nunca instrução sobre ativo: o que ela permite dizer é "esta medida não

@@ -74,16 +74,32 @@ class TesteCaudas(unittest.TestCase):
         self.assertLess(abs(C.kappa(self.normal)), 0.15)
         self.assertLess(abs(C.kappa(self.cauchy, robusto=True) - 1.0), 0.15)
 
-    def test_kappa_1_da_student_t3_reproduz_o_corpus(self):
-        # rodada corpus C: conferido no Wolfram, Student T(3) dá κ_1 = κ(1, 2) = 0,2904 e
-        # n_ν = 30^(-1/(κ_1 − 1)) = 120,7 — os "120 observations" de SCFT 8.3.2. Por simulação, semente fixa e
-        # tolerância folgada (a razão M(2)/M(1) por bootstrap oscila ±0,04 entre sementes com 200 mil reamostras)
+    def test_kappa_1_exato_bate_com_a_forca_bruta(self):
+        # fix 1: M(1) = média |x − x̄|; M(2) = média sobre TODOS os pares ordenados (i, j), com reposição, de
+        # |x_i + x_j − 2x̄| (estatística V) — sem Monte Carlo
         import random
+        r = random.Random(4)
+        for n in (3, 7, 40, 101):
+            xs = [r.gauss(0, 1) ** 3 for _ in range(n)]
+            m = sum(xs) / n
+            m1 = sum(abs(x - m) for x in xs) / n
+            m2 = sum(abs(a + b - 2 * m) for a in xs for b in xs) / (n * n)
+            esperado = 2 - math.log(2) / math.log(m2 / m1)
+            self.assertAlmostEqual(C.kappa_1_exato(xs), esperado, places=9, msg=n)
+        self.assertEqual(C.kappa_1_exato(xs), C.kappa_1_exato(list(reversed(xs))))
+        for ruim in ([1.0], [1.0, 1.0, 1.0], [1.0, float("nan")]):
+            with self.assertRaises(ValueError, msg=ruim):
+                C.kappa_1_exato(ruim)
+
+    def test_kappa_1_exato_gaussiana_zero_e_t3_do_corpus(self):
+        import random
+        r = random.Random(2)
+        self.assertLess(abs(C.kappa_1_exato([r.gauss(0, 1) for _ in range(20000)])), 0.03)
         r = random.Random(11)
         t3 = [r.gauss(0, 1) / math.sqrt(sum(r.gauss(0, 1) ** 2 for _ in range(3)) / 3) for _ in range(100000)]
-        k1 = C.kappa(t3, 1, 2, reamostras=200000)
-        self.assertLess(abs(k1 - 0.29), 0.06, k1)
-        self.assertGreater(k1, 0.15)                                    # acima do limiar do corpus
+        # conferido no Wolfram: Student T(3) dá κ_1 = 0,2904 e n_ν = 30^(−1/(κ_1−1)) = 120,7, os "120
+        # observations" de SCFT 8.3.2
+        self.assertLess(abs(C.kappa_1_exato(t3) - 0.2904), 0.02)
         self.assertAlmostEqual(30 ** (-1 / (0.2904 - 1)), 120.7, delta=0.1)
 
     def test_kappa_e_deterministico_pela_semente(self):

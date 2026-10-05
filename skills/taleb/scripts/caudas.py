@@ -17,6 +17,8 @@ Valores teóricos de kappa: Gaussiano κ=0, Cauchy κ=1. Conferência executada 
 Toda amostragem usa `random.Random(semente)` explícita: mesma semente, mesmo resultado, bit a bit.
 Entrada vazia ou com valor não finito (nan, inf) levanta ValueError.
 """
+import bisect
+import itertools
 import math
 import random
 import statistics
@@ -99,6 +101,28 @@ def kappa(xs, n0=1, n=30, reamostras=4000, semente=7, robusto=False):
     if m[n0] <= 0 or m[n] <= 0 or m[n] == m[n0]:
         raise ValueError(f"M(n0)={m[n0]!r}, M(n)={m[n]!r}: kappa indefinido (amostra degenerada ou pequena)")
     return 2.0 - (math.log(n) - math.log(n0)) / math.log(m[n] / m[n0])
+
+
+def kappa_1_exato(xs):
+    """κ_1 = κ(n0=1, n=2) de Taleb, EXATO para a distribuição empírica de `xs` (sem Monte Carlo):
+    M(1) = média de |x_i − x̄|; M(2) = média, sobre TODOS os pares ordenados (i, j) com reposição, de
+    |x_i + x_j − 2x̄| (estatística V); κ_1 = 2 − ln 2 / ln(M(2)/M(1)). M(2) sai em O(n log n): com y = x − x̄
+    ordenado e somas de prefixo, Σ_j |y_i + y_j| separa os j com y_j < −y_i dos demais. ValueError se a
+    amostra é degenerada (M(1) = 0 ou M(2) = M(1)). Equação: κ_1, eq. 8.8 e Table 8.3 —
+    Statistical_Consequences_of_Fat_Tails, tópicos 8.2 THE METRIC e 8.3.2."""
+    xs = _validar(xs)
+    n = len(xs)
+    media = math.fsum(xs) / n
+    ys = sorted(x - media for x in xs)
+    prefixo = [0.0] + list(itertools.accumulate(ys))
+    total = prefixo[-1]
+    soma = math.fsum((n - k) * y + (total - prefixo[k]) - (k * y + prefixo[k])
+                     for y, k in ((y, bisect.bisect_left(ys, -y)) for y in ys))
+    m1 = math.fsum(abs(y) for y in ys) / n
+    m2 = soma / (n * n)
+    if m1 <= 0 or m2 <= 0 or m2 == m1:
+        raise ValueError(f"M(1)={m1!r}, M(2)={m2!r}: κ_1 indefinido (amostra degenerada ou pequena)")
+    return 2.0 - math.log(2) / math.log(m2 / m1)
 
 
 def sobrevivencia_loglog(xs):

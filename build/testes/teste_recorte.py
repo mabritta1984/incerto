@@ -460,6 +460,16 @@ class TesteTituloAcimaDoCorte(unittest.TestCase):
         self.assertTrue(chunks[0]["texto"].startswith("# Parte"))
         self.assertEqual({c["cabecalho"] for c in chunks[1:]}, {"## Tabela"})
 
+    def test_linha_dentro_de_cerca_ou_de_bloco_display_nunca_e_titulo(self):
+        # fix 1: `# comentário` em código e `# …` dentro de `$$ … $$` não abrem tópico
+        texto = ("## A\n\n```python\n# comentario\n## nao\n```\n\n~~~\n# til\n~~~\n\n$$\n# x\n## y\n$$\n\n"
+                 "$$a$$\n\n## B\n\nb\n")
+        for nivel in (2, 3):
+            chunks = self.recortar(texto, nivel)
+            self.assertEqual([c["topico"] for c in chunks], ["A", "B"], nivel)
+            self.assertIn("# comentario\n## nao", chunks[0]["texto"]); self.assertIn("# x\n## y", chunks[0]["texto"])
+            self.assertVerbatim(texto, chunks)
+
     def test_titulo_acima_com_corpo_e_topico_proprio(self):
         texto = "# T\n\nabertura\n\n## A\n\ncurto\n"
         chunks = self.recortar(texto, 2)

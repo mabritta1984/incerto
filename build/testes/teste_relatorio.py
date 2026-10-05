@@ -77,32 +77,36 @@ class TesteRelatorio(unittest.TestCase):
         dominio = [l for l in linhas if l.startswith("- domínio")]
         self.assertTrue(dominio and dominio[0].endswith("[staging]"))  # mais fraca entre corpus e staging
 
-    def test_dominio_pelo_kappa_1_com_o_limiar_do_corpus(self):
-        # rodada corpus C: SCFT 8.3.2 — "Any value of κ above .15 effectively indicates a high degree of
-        # unreliability of the 'normal approximation'"; a eq. 8.8 usa κ_1 = κ(1, 2)
+    def test_dominio_pelo_intervalo_de_kappa_1_com_o_limiar_do_corpus(self):
+        # rodada corpus C + fix 1: SCFT 8.3.2 — "Any value of κ above .15 effectively indicates a high degree of
+        # unreliability of the 'normal approximation'"; a eq. 8.8 usa κ_1 = κ(1, 2). κ_1 exato (sem Monte Carlo)
+        # e julgado pelo intervalo bootstrap, como H: Extremistão se o limite inferior > 0,15, Mediocristão se o
+        # superior ≤ 0,15, senão fronteira
         self.assertEqual(R.LIMIAR_KAPPA, 0.15)
-        C = sys.modules["caudas"]
+        self.assertFalse(hasattr(R, "REAMOSTRAS_KAPPA_1"))                  # sem as 200 mil reamostras
+        from unittest import mock
         import random
         r = random.Random(3)
         g = [(date(2020, 1, 1), r.gauss(0, 0.01)) for _ in range(400)]       # α̂ ≥ 2: só o κ decide
-        chamadas = []
-
-        def kappa(valor_1):
-            def f(xs, n0=1, n=30, **kw):
-                chamadas.append((n0, n))
-                return {2: valor_1, 30: 0.0}[n]
-            return f
-        from unittest import mock
-        for valor, dominio in ((0.16, "Extremistão"), (0.15, "Mediocristão"), (0.10, "Mediocristão")):
-            with mock.patch.object(C, "kappa", kappa(valor)):
+        casos = (((0.16, 0.30), "**Extremistão**"), ((0.05, 0.15), "**Mediocristão**"),
+                 ((0.10, 0.20), "**fronteira** (κ_1 ∈ [0.100000; 0.200000] contém 0,15)"))
+        for (lo, hi), dominio in casos:
+            with mock.patch.object(R, "intervalo_kappa_1", lambda xs, lo=lo, hi=hi: (lo, hi)):
                 t = R.relatorio_ativo("TESTE3", g, 0.0, None)
-            self.assertIn("domínio: **%s**" % dominio, t, valor)
-        self.assertIn((1, 2), chamadas); self.assertIn((1, 30), chamadas)
+            self.assertIn("domínio: %s" % dominio, t, (lo, hi))
+        # o intervalo recalcula o κ_1 exato em cada reamostra (percentis 2,5 e 97,5, semente fixa)
+        C = sys.modules["caudas"]
+        with mock.patch.object(C, "kappa_1_exato", lambda xs: 0.2):
+            self.assertEqual(R.intervalo_kappa_1([0.0] * 10), (0.2, 0.2))
+        xs = [x for _, x in self.rets]
+        lo, hi = R.intervalo_kappa_1(xs)
+        self.assertLessEqual(lo, C.kappa_1_exato(xs)); self.assertGreaterEqual(hi, C.kappa_1_exato(xs))
+        self.assertEqual((lo, hi), R.intervalo_kappa_1(xs))
         t = self.rel({R.EQ_KAPPA: "aprovado"})
-        limiar = [l for l in t.split("\n") if l.startswith("- limiares")][0]
-        self.assertIn("κ_1 > 0.15", limiar); self.assertIn("SCFT 8.3.2", limiar)
-        self.assertIn("[corpus]", limiar)
-        self.assertRegex(t, r"- κ_1 = κ\(n0=1, n=2\) = \S+ — equação `kappa` \[corpus\]")
+        limiar = [l for l in t.split("\n") if l.startswith("- limiares: Extremistão se κ_1")][0]
+        for trecho in ("0.15", "SCFT 8.3.2", "eq. 8.8", "Table 8.3", "[corpus]"):
+            self.assertIn(trecho, limiar)
+        self.assertRegex(t, r"- κ_1 = κ\(n0=1, n=2\), exato = \S+, IC95% bootstrap \[\S+; \S+\] — equação `kappa` \[corpus\]")
         self.assertRegex(t, r"κ\(n0=1, n=30\) = \S+ \(informativo\) — equação `kappa` \[corpus\]")
 
     def test_status_desconhecido_e_externo(self):
@@ -134,8 +138,17 @@ class TesteRelatorio(unittest.TestCase):
         self.assertRegex(veredito, r"frágil|robusto|antifrágil")
 
     def test_veredito_extremistao_para_cauda_gorda_e_mediocristao_para_gaussiana(self):
+        # fix 1: a fixture Student-t(3) de 500 pontos tem κ_1 exato ≈ 0,21 com IC95% ≈ [0,12; 0,29], que contém
+        # 0,15 — fronteira pelo κ (e α̂ ≈ 3,4 não decide); com 2000 pontos o intervalo já fica acima do limiar
         t = self.rel()
-        self.assertIn("Extremistão", t[t.index("## Veredito"):])
+        self.assertIn("domínio: **fronteira**", t[t.index("## Veredito"):])
+        import math as _m
+        import random as _rnd
+        r = _rnd.Random(15)
+        t3 = [(date(2020, 1, 1), r.gauss(0, 0.01) / _m.sqrt(sum(r.gauss(0, 1) ** 2 for _ in range(3)) / 3))
+              for _ in range(2000)]
+        v = R.relatorio_ativo("TESTE3", t3, 0.0, None)
+        self.assertIn("domínio: **Extremistão**", v[v.index("## Veredito"):])
         import random
         r = random.Random(3)
         g = [(date(2020, 1, 1), r.gauss(0, 0.01)) for _ in range(400)]
@@ -274,7 +287,7 @@ class TesteCLI(unittest.TestCase):
         codigo, out, err = self.roda("--ticker", "TESTE3", "--cotahist", caminho, "--sgs-cache", cache,
                                      "--status-equacoes", status)
         self.assertEqual(codigo, 0, err)
-        self.assertRegex(out, r"κ_1 = κ\(n0=1, n=2\) = \S+ — equação `kappa` \[corpus\]")
+        self.assertRegex(out, r"κ_1 = κ\(n0=1, n=2\), exato = \S+, IC95% bootstrap \[\S+; \S+\] — equação `kappa` \[corpus\]")
         self.assertRegex(out, r"α̂ de Hill.*— equação `hill` \[staging\]")
         self.assertRegex(out, r"razão máximo/soma.*`razao_max_soma` \[externo\]")
         for conteudo in ("[1, 2]", "{\"kappa\": 1}", "não é json"):

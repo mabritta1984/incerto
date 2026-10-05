@@ -17,11 +17,14 @@ usam-nos como vêm; a seção de ergodicidade os converte em retornos simples (e
 diferença entre ln(1+taxa) e a taxa é desprezível em taxas diárias e é ignorada de propósito).
 
 Veredito (determinístico): Extremistão se κ_1 = κ(n0=1, n=2) > 0,15 ou α̂ de Hill (cauda esquerda, k = max(10,
-n//20)) < 2; senão Mediocristão. O limiar de κ é o do corpus (SCFT 8.3.2: "Any value of κ above .15
-effectively indicates a high degree of unreliability of the 'normal approximation'"; a eq. 8.8 usa κ_1) e sai
-`[corpus]`; o de α̂ é do incerto e sai `[externo]`. κ_1 é estimado com `REAMOSTRAS_KAPPA_1` reamostras: com as
-4000 padrão de `caudas.kappa`, o κ_1 de uma gaussiana oscila ±0,1 entre amostras e cruzaria o limiar à toa.
-κ(n0=1, n=30) continua no relatório como linha informativa. Classe de fragilidade = intervalo bootstrap de 95% de
+n//20)) < 2; senão Mediocristão. κ_1 é o exato da amostra (`caudas.kappa_1_exato`, sem Monte Carlo) e é
+julgado pelo intervalo bootstrap de 95% (`intervalo_kappa_1`, o mesmo percentil do intervalo de H, κ_1 exato
+recalculado em cada reamostra): Extremistão pelo κ se o limite inferior > 0,15; Mediocristão pelo κ se o
+superior ≤ 0,15; senão **fronteira** (κ_1 ∈ [lo; hi] contém 0,15), dita explicitamente — e então o domínio é
+fronteira, salvo α̂ < 2 (Extremistão). O limiar de κ é o do corpus (SCFT 8.3.2: "Any value of κ above .15
+effectively indicates a high degree of unreliability of the 'normal approximation'"; a eq. 8.8 usa κ_1 e a
+Table 8.3 o tabula) e sai `[corpus]`; o de α̂ é do incerto e sai `[externo]`. κ(n0=1, n=30) continua no
+relatório como linha informativa. Classe de fragilidade = intervalo bootstrap de 95% de
 `assimetria_empirica` (500 reamostras, semente fixa): antifrágil se todo acima de 0, frágil se todo abaixo, robusto
 se contém 0. Todo número impresso termina com marcação de fonte; linhas derivadas levam a mais fraca das entradas. O veredito diagnostica exposição e NUNCA recomenda
 ativo: usa só frágil/robusto/antifrágil/Extremistão/Mediocristão e termina com a linha fixa FECHAMENTO.
@@ -58,8 +61,10 @@ EQ_CRESC_ENSEMBLE = "crescimento_ensemble"
 
 MINIMO_RETORNOS = 60
 LIMIAR_KAPPA = 0.15        # [corpus] SCFT 8.3.2, sobre κ_1 = κ(1, 2)
-FONTE_LIMIAR_KAPPA = "SCFT 8.3.2 (Statistical_Consequences_of_Fat_Tails.pdf.md, 8.3.2 Practical significance for sample sufficiency)"
-REAMOSTRAS_KAPPA_1 = 200000
+FONTE_LIMIAR_KAPPA = ("SCFT 8.3.2 (Statistical_Consequences_of_Fat_Tails.pdf.md, 8.3.2 Practical significance for "
+                      "sample sufficiency), eq. 8.8 (κ_1 em uso) e Table 8.3 (8.2 THE METRIC)")
+REAMOSTRAS_K1 = 500
+SEMENTE_K1 = 15
 LIMIAR_ALFA = 2.0
 FECHAMENTO = "Isto não é recomendação de ativo."
 REAMOSTRAS_H = 500
@@ -81,6 +86,25 @@ def intervalo_h(xs, reamostras=REAMOSTRAS_H, semente=SEMENTE_H):
     hs = sorted(convexidade.assimetria_empirica([xs[r.randrange(n)] for _ in range(n)])
                 for _ in range(reamostras))
     return hs[int(0.025 * reamostras)], hs[int(0.975 * reamostras) - 1]
+
+
+def intervalo_kappa_1(xs, reamostras=REAMOSTRAS_K1, semente=SEMENTE_K1):
+    """Intervalo de 95% de κ_1 (percentis 2,5 e 97,5, como `intervalo_h`): `reamostras` reamostragens de `xs`
+    com reposição, `random.Random(semente)`, e o κ_1 exato (`caudas.kappa_1_exato`) de cada uma."""
+    r = random.Random(semente)
+    n = len(xs)
+    ks = sorted(caudas.kappa_1_exato([xs[r.randrange(n)] for _ in range(n)]) for _ in range(reamostras))
+    return ks[int(0.025 * reamostras)], ks[int(0.975 * reamostras) - 1]
+
+
+def dominio_pelo_kappa(baixo, alto):
+    """'Extremistão' se o intervalo de κ_1 fica todo acima do limiar; 'Mediocristão' se todo ≤ ele; senão
+    'fronteira'."""
+    if baixo > LIMIAR_KAPPA:
+        return "Extremistão"
+    if alto <= LIMIAR_KAPPA:
+        return "Mediocristão"
+    return "fronteira"
 
 
 def classe_fragilidade(baixo, alto):
@@ -116,7 +140,9 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
     tag = lambda nome: etiqueta(nome, status_equacoes)
     k = max(10, n // 20)
 
-    kap1 = caudas.kappa(xs, 1, 2, reamostras=REAMOSTRAS_KAPPA_1)
+    kap1 = caudas.kappa_1_exato(xs)
+    k1_baixo, k1_alto = intervalo_kappa_1(xs)
+    ic_k1 = f"IC95% bootstrap [{_f(k1_baixo)}; {_f(k1_alto)}]"
     kap30 = caudas.kappa(xs, 1, 30)
     alfa = caudas.hill(xs, k, "esquerda")
     r2 = caudas.razao_max_soma(xs, 2)[-1]
@@ -129,8 +155,14 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
     simples = [math.exp(x) - 1.0 for x in xs]
     temporal = convexidade.crescimento_temporal(simples)
     ensemble = convexidade.crescimento_ensemble(simples)
-    extremistao = kap1 > LIMIAR_KAPPA or alfa < LIMIAR_ALFA
-    dominio = "Extremistão" if extremistao else "Mediocristão"
+    pelo_kappa = dominio_pelo_kappa(k1_baixo, k1_alto)
+    if alfa < LIMIAR_ALFA or pelo_kappa == "Extremistão":
+        dominio = "**Extremistão**"
+    elif pelo_kappa == "fronteira":
+        dominio = (f"**fronteira** (κ_1 ∈ [{_f(k1_baixo)}; {_f(k1_alto)}] contém 0,15) — nem Extremistão nem "
+                   f"Mediocristão pelo κ, e α̂ ≥ {LIMIAR_ALFA:g} não decide")
+    else:
+        dominio = "**Mediocristão**"
 
     L = [f"# Relatório de {ticker}", "",
          f"- Amostra: {n} retornos logarítmicos diários, de {retornos[0][0].isoformat()} a "
@@ -139,7 +171,7 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
          "Fonte de cada número: nome da equação e marcação corpus, staging ou externo (externo = a equação "
          "não consta como aprovada ou em staging no grafo).", "",
          "## Caudas", "",
-         f"- κ_1 = κ(n0=1, n=2) = {_f(kap1)} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
+         f"- κ_1 = κ(n0=1, n=2), exato = {_f(kap1)}, {ic_k1} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
          f"- κ(n0=1, n=30) = {_f(kap30)} (informativo) — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
          f"- α̂ de Hill, cauda esquerda, k={k} = {_f(alfa)} — equação `{EQ_HILL}` {tag(EQ_HILL)}",
          f"- razão máximo/soma R_n(p=2) = {_f(r2)} — equação `{EQ_MAX_SOMA}` {tag(EQ_MAX_SOMA)}",
@@ -159,10 +191,11 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
          f"- excesso de crescimento temporal sobre a taxa livre = {_f(temporal - taxa_livre_diaria)} — "
          f"equação `{EQ_CRESC_TEMPORAL}` {tag(EQ_CRESC_TEMPORAL)}", "",
          "## Veredito", "",
-         f"- domínio: **{dominio}** — derivado de κ e α̂ (equações `{EQ_KAPPA}` e `{EQ_HILL}`) {tag_dom}",
-         f"- limiares: Extremistão se κ_1 > {LIMIAR_KAPPA} — limiar do corpus, fonte: {FONTE_LIMIAR_KAPPA} [corpus]",
+         f"- domínio: {dominio} — derivado de κ e α̂ (equações `{EQ_KAPPA}` e `{EQ_HILL}`) {tag_dom}",
+         f"- limiares: Extremistão se κ_1 > {LIMIAR_KAPPA} (todo o IC95%; Mediocristão se todo ≤ {LIMIAR_KAPPA}, "
+         f"senão fronteira) — limiar do corpus, fonte: {FONTE_LIMIAR_KAPPA} [corpus]",
          f"- limiares: ou se α̂ < {LIMIAR_ALFA:g} — limiar do incerto [externo]",
-         f"- κ_1 = {_f(kap1)} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
+         f"- κ_1 = {_f(kap1)}, {ic_k1} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
          f"- α̂ = {_f(alfa)} — equação `{EQ_HILL}` {tag(EQ_HILL)}",
          f"- fragilidade: **{classe}** — H = {_f(h)}, {ic} — equação `{EQ_ASSIMETRIA}` "
          f"{tag(EQ_ASSIMETRIA)}",

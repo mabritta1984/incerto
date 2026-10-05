@@ -34,6 +34,10 @@ Provas (uma linha por prova; `prova`, `alvo`, `veredito` ∈ verde|vermelho|inde
                  a `saida` verbatim no `detalhe` (desatualizada → vermelho "prova Wolfram desatualizada");
                  sem essa prova, nenhuma linha (nada muda). Chaves estruturadas da P4: `mae`, `filha`
                  (derivação), `equacao` (momento) ou `equacao` + `prova_wolfram` (equação).
+Regra do veredito (dono único: `conferir_veredito_wolfram`, aplicada no registro e na carga): verde só com o
+último `Out[n]=` exatamente 0 (ou lista só de 0); indeterminado recusado sobre diferença fechada não nula. A
+prova carregada que a fere dá P4 vermelho "prova Wolfram inválida". Prova sem equação/derivação na onda vira
+aviso "prova órfã" (`provas_orfas`) no relatório, não linha do JSONL.
 `provas_sympy` roda só P1–P3; `provas` roda a tabela `PROVAS` inteira (P1–P4), que é o que a CLI grava.
 
 `provas_wolfram(caminho)`: lê `provas-<onda>.jsonl` (ausente = nenhuma prova) e indexa por
@@ -249,8 +253,71 @@ def chave_wolfram(linha):
     return (prova,) + tuple(linha.get(k) for k in CHAVES_WOLFRAM[prova])
 
 
-def validar_prova_wolfram(linha):
-    """Levanta `ValueError` se `linha` não estiver exatamente no formato de `registrar_prova.py`."""
+RE_OUT = re.compile(r"^Out\[\d+\]=(.*)$", re.M)
+RE_ZERO = re.compile(r"^(?:0|\{\s*0(?:\s*,\s*0)*\s*\})$")
+# cabeças que o Wolfram devolve sem avaliar (ou que não são um número fechado): com uma delas no resultado,
+# a diferença não foi calculada e o indeterminado é legítimo. `Infinity`/`ComplexInfinity` são como
+# `DirectedInfinity` aparece na saída; `Solve`/`Reduce` sem avaliar entram pelo protocolo da derivação.
+CABECAS_ABERTAS = ("Integrate", "NIntegrate", "Limit", "Expectation", "NExpectation", "Sum", "Piecewise",
+                   "ConditionalExpression", "Indeterminate", "$Failed", "DirectedInfinity", "Undefined",
+                   "ComplexInfinity", "Infinity", "Solve", "Reduce")
+RE_ABERTO = re.compile(r"(?<![A-Za-z0-9$])(?:%s)(?![A-Za-z0-9])" % "|".join(re.escape(c) for c in CABECAS_ABERTAS))
+RE_SEM_RESULTADO = re.compile(r"\$Aborted|TimeConstrained|timeout|TimeLimit", re.I)
+
+
+def resultado_wolfram(saida):
+    """O que vem depois do último `Out[n]=` da saída (sem espaços nas pontas), ou None se não houver."""
+    achados = RE_OUT.findall(saida.replace("\r\n", "\n").replace("\r", "\n"))
+    return achados[-1].strip() if achados else None
+
+
+def _elementos_da_lista(resultado):
+    """Os elementos de nível 1 de `{a, b, …}` (texto), ou None se o resultado não é uma lista."""
+    if not (resultado.startswith("{") and resultado.endswith("}")):
+        return None
+    miolo, partes, nivel, atual = resultado[1:-1], [], 0, ""
+    for ch in miolo:
+        if ch in "{[(":
+            nivel += 1
+        elif ch in "}])":
+            nivel -= 1
+        if ch == "," and nivel == 0:
+            partes.append(atual.strip()); atual = ""
+        else:
+            atual += ch
+    if atual.strip():
+        partes.append(atual.strip())
+    return partes
+
+
+def diferenca_fechada_nao_nula(saida):
+    """A saída é uma diferença que o Wolfram CALCULOU e que não é 0? Não é quando falta `Out[n]=`, quando há
+    `$Aborted`/tempo esgotado, quando o resultado tem cabeça não avaliada (`CABECAS_ABERTAS`), quando é 0 (ou
+    lista só de 0), lista vazia (`Solve` sem solução) ou lista de ramos com algum 0 (a filha escolhe um ramo)."""
+    resultado = resultado_wolfram(saida)
+    if resultado is None or RE_SEM_RESULTADO.search(saida) or RE_ABERTO.search(resultado) or RE_ZERO.match(resultado):
+        return False
+    elementos = _elementos_da_lista(resultado)
+    return not (elementos is not None and (not elementos or "0" in elementos))
+
+
+def conferir_veredito_wolfram(veredito, saida):
+    """Regra do veredito de toda prova Wolfram (dono único; vale no registro e na carga das provas).
+    `ValueError` se `veredito` é verde e o último `Out[n]=` não é exatamente `0` nem uma lista só de `0`
+    (`{0, 0}`), ou se é indeterminado e a saída é uma diferença fechada não nula (o Wolfram calculou e não
+    deu 0: é vermelho). Vermelho entra como o agente decidiu (`references/fiscal.md`)."""
+    if veredito == VERDE:
+        resultado = resultado_wolfram(saida)
+        if resultado is None or not RE_ZERO.match(resultado):
+            raise ValueError("veredito verde recusado: o último `Out[n]=` da saída é %s, e verde exige exatamente "
+                             "`0` ou uma lista só de `0` (`{0, 0}`) — o veredito é o que a saída diz"
+                             % ("ausente" if resultado is None else repr(resultado)))
+    elif veredito == INDETERMINADO and diferenca_fechada_nao_nula(saida):
+        raise ValueError("veredito indeterminado recusado: o último `Out[n]=` da saída é %r, uma diferença fechada "
+                         "não nula — o Wolfram calculou e não deu 0: o veredito é vermelho" % resultado_wolfram(saida))
+
+
+def _validar_formato_wolfram(linha):
     if not isinstance(linha, dict):
         raise ValueError("linha não é objeto JSON")
     chave_wolfram(linha)
@@ -266,6 +333,13 @@ def validar_prova_wolfram(linha):
             raise ValueError("`%s` vazio ou não texto" % k)
     if len(linha["impressao"]) != 64 or set(linha["impressao"]) - set("0123456789abcdef"):
         raise ValueError("`impressao` não é sha256 hex: %r" % linha["impressao"])
+
+
+def validar_prova_wolfram(linha):
+    """Levanta `ValueError` se `linha` não estiver exatamente no formato de `registrar_prova.py` ou se o
+    veredito não respeitar a regra (`conferir_veredito_wolfram`) — para P2, momento e equação."""
+    _validar_formato_wolfram(linha)
+    conferir_veredito_wolfram(linha["veredito"], linha["saida"])
 
 
 def impressao(conteudo):
@@ -319,7 +393,10 @@ def aplica_momento(srepr):
 
 
 def provas_wolfram(caminho):
-    """`provas-<onda>.jsonl` indexado por `chave_wolfram`; arquivo ausente = nenhuma prova."""
+    """`provas-<onda>.jsonl` indexado por `chave_wolfram`; arquivo ausente = nenhuma prova. Formato errado ou
+    chave repetida → `ValueError`. Linha bem formada cujo veredito fere a regra (verde editado à mão sobre saída
+    não nula, indeterminado que esconde uma diferença não nula) é carregada com `invalida` (o motivo): a P4 a
+    dá vermelha "prova Wolfram inválida"."""
     if not os.path.exists(caminho):
         return {}
     indice = {}
@@ -329,9 +406,13 @@ def provas_wolfram(caminho):
                 continue
             try:
                 linha = json.loads(texto)
-                validar_prova_wolfram(linha)
+                _validar_formato_wolfram(linha)
             except ValueError as e:
                 raise ValueError("%s, linha %d: %s" % (caminho, n, e))
+            try:
+                conferir_veredito_wolfram(linha["veredito"], linha["saida"])
+            except ValueError as e:
+                linha = dict(linha, invalida=str(e))
             chave = chave_wolfram(linha)
             if chave in indice:
                 raise ValueError("%s, linha %d: prova repetida %s" % (caminho, n, "/".join(chave)))
@@ -388,6 +469,8 @@ def _p3_validade(ctx):
 
 def _desatualizada(w, chave, ctx):
     """Motivo pelo qual a prova `w` não vale para a onda como está agora, ou None."""
+    if w.get("invalida"):
+        return "prova Wolfram inválida (%s) — saída: %s" % (w["invalida"], w["saida"])
     try:
         esperada = impressao_esperada(chave, ctx["equacoes"], ctx["derivacoes"])
     except ValueError as e:
@@ -459,6 +542,22 @@ def _p4_duas_vias(ctx):
                        % (eq.get("latex"), w["veredito"], w["saida"]))
 
 
+def provas_orfas(equacoes, derivacoes, wolfram):
+    """Avisos (nunca linhas do portão) das provas Wolfram registradas que não se juntam a nada da onda atual:
+    derivação não declarada em `derivacoes-`, equação que não existe mais. Ordenados por chave."""
+    nomes = {e["nome"] for e in equacoes}
+    pares = {(d.get("mae"), d.get("filha")) for d in derivacoes}
+    avisos = []
+    for chave in sorted(wolfram, key=lambda c: tuple(str(x).encode("utf-8") for x in c)):
+        if chave[0] == "P2":
+            motivo = None if chave[1:] in pares else "derivação de %s a %s não declarada" % chave[1:]
+        else:
+            motivo = None if chave[1] in nomes else "equação %s não existe na onda" % chave[1]
+        if motivo:
+            avisos.append("prova órfã: %s — %s; a prova não conta para nada" % ("/".join(chave), motivo))
+    return avisos
+
+
 PROVAS_SYMPY = (("P1", _p1_parse), ("P2", _p2_derivacao), ("P3", _p3_validade))
 PROVAS = PROVAS_SYMPY + (("P4", _p4_duas_vias),)
 
@@ -497,7 +596,7 @@ def _celula(valor):
     return str(valor).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
-def relatorio(onda, linhas):
+def relatorio(onda, linhas, avisos=()):
     contagem = {v: sum(1 for l in linhas if l["veredito"] == v) for v in (VERDE, VERMELHO, INDETERMINADO)}
     partes = ["# Fiscal — onda %s\n\n" % onda,
               "Provas: %d · verde: %d · vermelho: %d · indeterminado: %d\n\n"
@@ -507,6 +606,8 @@ def relatorio(onda, linhas):
               "| prova | alvo | veredito | detalhe | ms |\n", "|---|---|---|---|---|\n"]
     for l in linhas:
         partes.append("| %s |\n" % " | ".join(_celula(l[k]) for k in ("prova", "alvo", "veredito", "detalhe", "ms")))
+    if avisos:
+        partes.append("\n## Avisos\n\n" + "".join("- %s\n" % a for a in avisos))
     return "".join(partes)
 
 
@@ -555,8 +656,10 @@ def main(argv=None):
     except ValueError as e:
         sys.exit("provas Wolfram inválidas — %s" % e)
     linhas = provas(equacoes, ler_jsonl(arquivo("derivacoes")), ler_jsonl(arquivo("validades")), wolfram)
+    derivacoes = ler_jsonl(arquivo("derivacoes"))
+    avisos = provas_orfas(equacoes, derivacoes, wolfram)
     caminho_md = args.relatorio or arquivo("fiscal", "md")
-    _gravar(caminho_md, relatorio(args.onda, linhas))
+    _gravar(caminho_md, relatorio(args.onda, linhas, avisos))
     _gravar(arquivo("fiscal"), jsonl(linhas))
     print("gravado: %s e %s" % (caminho_md, arquivo("fiscal")))
     for v in (VERDE, VERMELHO, INDETERMINADO):
@@ -564,6 +667,8 @@ def main(argv=None):
     for l in linhas:
         if l["veredito"] != VERDE:
             print("%s %s %s — %s" % (l["prova"], l["veredito"], l["alvo"], l["detalhe"]))
+    for a in avisos:
+        print("AVISO: %s" % a)
     return 0
 
 

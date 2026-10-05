@@ -77,10 +77,24 @@ cujo código confere todas de uma vez (ver abaixo).
    Chave já registrada é recusada; refazer uma prova exige `--substituir` (a linha antiga sai do arquivo).
    **O verde é conferido**: o registrador lê a última linha `Out[n]=` da saída e só aceita `--veredito
    verde` se o que vem depois dela for exatamente `0` ou uma lista só de `0` (`{0}`, `{0, 0}`); saída sem
-   `Out[n]=`, ou com qualquer outro resultado, recusa o verde sem gravar nada. `vermelho` e
-   `indeterminado` são registrados como o agente os decidiu.
+   `Out[n]=`, ou com qualquer outro resultado, recusa o verde sem gravar nada. **O indeterminado também é
+   conferido — o Wolfram decide**: se o último `Out[n]=` é uma diferença **fechada e não nula**, o Wolfram
+   calculou e não deu 0, e isso é `vermelho`; `--veredito indeterminado` é recusado. "Fechada" = há
+   `Out[n]=`, a saída não tem `$Aborted` nem tempo esgotado (`TimeConstrained`, `timeout`), e o resultado não
+   tem cabeça não avaliada: `Integrate`, `NIntegrate`, `Limit`, `Expectation`, `NExpectation`, `Sum`,
+   `Piecewise`, `ConditionalExpression`, `Indeterminate`, `$Failed`, `DirectedInfinity` (na saída,
+   `Infinity`/`ComplexInfinity`), `Undefined`, e — pelo protocolo da derivação — `Solve`/`Reduce` devolvidos sem
+   avaliar. Continuam indeterminado legítimo: lista vazia `{}` (`Solve` sem solução) e lista de ramos com algum
+   `0` (a filha escolhe um ramo). `vermelho` é registrado como o agente o decidiu.
+
+   **Dono único da regra**: `fiscal.conferir_veredito_wolfram`. O registrador a aplica antes de gravar; o
+   fiscal a reaplica ao CARREGAR `provas-<onda>.jsonl` (P2, momento e equação): linha editada à mão que a fere
+   (verde sobre saída não nula, indeterminado sobre diferença fechada não nula) não aborta o fiscal — a P4
+   dela sai `vermelho` "prova Wolfram inválida", com o motivo e a saída verbatim.
 7. `fiscal.py --onda <onda>` de novo: a P4 junta as provas às linhas P2 e aos momentos e dá o veredito
-   final da segunda via.
+   final da segunda via. Prova registrada que não se junta a nada da onda (equação que não existe mais,
+   derivação não declarada) sai como aviso "prova órfã" na seção `## Avisos` do relatório e na saída do
+   fiscal — nunca em silêncio, e nunca como linha do `fiscal-<onda>.jsonl`.
 
 ## Do candidato ao código Wolfram
 

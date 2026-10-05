@@ -119,6 +119,9 @@ class TesteSkillTaleb(unittest.TestCase):
         self.assertIn("kappa > 0.15 or alpha < 2", conds)
         texto = ler(HEURISTICAS)
         self.assertIn("8.3.2", texto); self.assertIn("κ(n0=1, n=2)", texto)
+        # fix 1: κ_1 exato julgado pelo intervalo bootstrap inteiro, como H; fronteira não dispara heurística
+        self.assertIn("kappa_1_exato", texto); self.assertIn("fronteira", texto)
+        self.assertIn("eq. 8.8", texto); self.assertIn("Table 8.3", texto)
         self.assertNotIn("0,3", texto); self.assertNotIn("0.3 ", texto)
 
     def test_heuristicas_nao_autorizam_variancia(self):

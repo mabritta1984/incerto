@@ -242,6 +242,14 @@ class TesteProvaDeEquacao(unittest.TestCase):
         self.assertEqual(sorted(FI.provas_wolfram(self.arquivo)),
                          [("equacao", "SCFT#248"), ("equacao", "pareto#3"), ("momento", "pareto#3")])
 
+    def test_indeterminado_com_diferenca_fechada_nao_nula_e_recusado(self):
+        # fix 1: o Wolfram calculou a diferença e não deu 0 — é vermelho, não indeterminado
+        with self.assertRaises(SystemExit) as c:
+            self.equacao("SCFT#248", "indeterminado")
+        self.assertIn("indeterminado", str(c.exception.code))
+        self.assertFalse(os.path.exists(self.arquivo))
+        self.assertIs(RP.conferir_veredito, FI.conferir_veredito_wolfram)    # dono único: fiscal.py
+
     def test_equacao_desconhecida_e_recusada(self):
         with self.assertRaises(SystemExit):
             self.equacao("nada#7")

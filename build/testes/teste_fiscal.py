@@ -318,9 +318,9 @@ class TesteP4(unittest.TestCase):
         p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", "verde", saida, (eqs, [])))))
         self.assertEqual(p4[0]["veredito"], "verde"); self.assertIn(saida, p4[0]["detalhe"])
         self.assertEqual(sorted(p4[0]), ["alvo", "detalhe", "equacao", "ms", "prova", "veredito"])
-        for v in ("vermelho", "indeterminado"):
-            p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", v, "Out[1]= alpha", (eqs, [])))))
-            self.assertEqual(p4[0]["veredito"], v); self.assertIn("Out[1]= alpha", p4[0]["detalhe"])
+        for v, saida in (("vermelho", "Out[1]= alpha"), ("indeterminado", "Out[1]= Expectation[x, alpha]")):
+            p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", v, saida, (eqs, [])))))
+            self.assertEqual(p4[0]["veredito"], v); self.assertIn(saida, p4[0]["detalhe"])
 
     def test_equacao_que_aplica_e_ou_var_sem_momento_fechado_e_indeterminado(self):
         # `\mathbb{E}[X] = …` é um momento fechado sem declaração: sem a P4 ela sairia só com a P1 verde
@@ -503,6 +503,89 @@ class TesteProvasWolfram(unittest.TestCase):
                 provas_wolfram(self.caminho)
 
 
+class TesteRegraDoVeredito(unittest.TestCase):
+    """Fix 1: a regra do veredito tem dono único em `fiscal.py` e vale no registro E na carga das provas.
+    Verde só com o último `Out[n]=` exatamente 0 (ou lista só de 0); indeterminado não pode esconder uma
+    diferença fechada não nula (o Wolfram calculou e não deu 0: é vermelho)."""
+    SAIDA_PHI = "Out[1]= (2*alpha)/(-1 + alpha)"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.caminho = os.path.join(self.tmp, "provas.jsonl")
+        self.eqs = [TesteP4.cand(self, "SCFT#268", r"\frac{p^*}{p} = \frac{\alpha}{1 - \alpha}"),
+                    TesteP4.cand(self, "kelly#1", MAE_KELLY), TesteP4.cand(self, "kelly#2", FILHA_KELLY),
+                    TesteP4.cand(self, "pareto#3", r"m = \frac{\alpha L}{\alpha - 1}",
+                                 momento_fechado={"media": "alpha*L/(alpha-1)"})]
+        self.ders = [{"filha": "kelly#2", "mae": "kelly#1", "alvo": "f", "substituicao": {}}]
+
+    def escrever(self, linhas):
+        with io.open(self.caminho, "w", encoding="utf-8", newline="\n") as f:
+            f.writelines(json.dumps(l, sort_keys=True, ensure_ascii=False) + "\n" for l in linhas)
+
+    def test_regra_do_veredito(self):
+        ok = (("verde", "Out[1]= 0"), ("verde", "aviso\n\nOut[2]= {0, 0}"),
+              ("vermelho", self.SAIDA_PHI), ("vermelho", "Out[1]= 0"),
+              ("indeterminado", "$Aborted"), ("indeterminado", "Out[1]= 0"),
+              ("indeterminado", "Out[1]= {}"), ("indeterminado", "Out[1]= {0, 2*x}"),
+              ("indeterminado", "Out[1]= Integrate[f[x], {x, 0, K}]"), ("indeterminado", "Out[1]= Limit[a/K, K -> Infinity]"),
+              ("indeterminado", "Out[1]= Expectation[x, x \\[Distributed] d]"), ("indeterminado", "Out[1]= Indeterminate"),
+              ("indeterminado", "Out[1]= ConditionalExpression[0, alpha > 1]"), ("indeterminado", "Out[1]= $Failed"),
+              ("indeterminado", "Out[1]= Piecewise[{{1, x > 0}}, 0]"), ("indeterminado", "Out[1]= DirectedInfinity[1]"),
+              ("indeterminado", "Out[1]= Undefined"), ("indeterminado", "Out[1]= NIntegrate[g[x], {x, 0, 1}]"),
+              ("indeterminado", "Out[1]= Sum[1/k, {k, 1, n}]"), ("indeterminado", "Out[1]= NExpectation[x, d]"),
+              ("indeterminado", "TimeConstrained::timeout: tempo\nOut[1]= alpha"),
+              ("indeterminado", "Out[1]= x /. Solve[y == e^x, x]"))
+        for veredito, saida in ok:
+            FI.conferir_veredito_wolfram(veredito, saida)
+        recusados = (("verde", self.SAIDA_PHI), ("verde", "sem Out"), ("verde", "Out[1]= {0, x}"),
+                     ("indeterminado", self.SAIDA_PHI), ("indeterminado", "Out[1]= alpha"),
+                     ("indeterminado", "Out[1]= {2, 3}"), ("indeterminado", "Out[1]= ((-1 + Log[e])*Log[y])/Log[e]"))
+        for veredito, saida in recusados:
+            with self.assertRaises(ValueError, msg=(veredito, saida)) as c:
+                FI.conferir_veredito_wolfram(veredito, saida)
+            self.assertIn(veredito, str(c.exception))
+
+    def test_validar_prova_aplica_a_regra_aos_tres_tipos(self):
+        for linha in (wolfram_p2("kelly#1", "kelly#2", "verde", SAIDA_ERRADA),
+                      wolfram_momento("pareto#3", "verde", "Out[1]= alpha"),
+                      wolfram_equacao("SCFT#268", "verde", self.SAIDA_PHI),
+                      wolfram_equacao("SCFT#268", "indeterminado", self.SAIDA_PHI)):
+            with self.assertRaises(ValueError, msg=linha["prova"]):
+                FI.validar_prova_wolfram(linha)
+
+    def test_sonda_do_revisor_verde_editado_a_mao_e_vermelho(self):
+        # a linha de provas de SCFT#268 editada à mão para `veredito: verde` com a saída não nula
+        onda = (self.eqs, self.ders)
+        self.escrever([wolfram_equacao("SCFT#268", "verde", self.SAIDA_PHI, onda),
+                       wolfram_p2("kelly#1", "kelly#2", "verde", SAIDA_ERRADA, onda),
+                       wolfram_momento("pareto#3", "indeterminado", "Out[1]= alpha", onda)])
+        w = provas_wolfram(self.caminho)                                     # carrega: não aborta
+        p4 = [l for l in provas(self.eqs, self.ders, [], w) if l["prova"] == "P4"]
+        self.assertEqual([(l["alvo"], l["veredito"]) for l in p4],
+                         [("kelly#2", "vermelho"), ("pareto#3", "vermelho"), ("SCFT#268", "vermelho")])
+        for l in p4:
+            self.assertIn("prova Wolfram inválida", l["detalhe"])
+        self.assertIn(self.SAIDA_PHI, p4[2]["detalhe"])
+
+
+class TesteProvasOrfas(unittest.TestCase):
+    """Fix 1: prova registrada cuja equação (ou derivação) não existe mais vira aviso, não silêncio."""
+
+    def test_orfas(self):
+        eqs = [{"nome": "a#1", "srepr": "x", "latex": "x"}, {"nome": "a#2", "srepr": "y", "latex": "y"},
+               {"nome": "m#1", "srepr": "z", "latex": "z", "momento_fechado": {"media": "z"}}]
+        ders = [{"mae": "a#1", "filha": "a#2", "alvo": "x", "substituicao": {}}]
+        w = indice(wolfram_p2("a#1", "a#2", "verde"), wolfram_p2("a#2", "a#1", "verde"),
+                   wolfram_momento("m#1", "verde"), wolfram_momento("sumiu#9", "verde"),
+                   wolfram_equacao("a#1", "verde"), wolfram_equacao("sumiu#8", "vermelho"))
+        avisos = FI.provas_orfas(eqs, ders, w)
+        self.assertEqual(len(avisos), 3, avisos)
+        for a, chave in zip(avisos, ("P2/a#2/a#1", "equacao/sumiu#8", "momento/sumiu#9")):
+            self.assertIn("prova órfã", a); self.assertIn(chave, a)
+        self.assertEqual(FI.provas_orfas(eqs, ders, {}), [])
+
+
 class TesteCli(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -581,6 +664,17 @@ class TesteCli(unittest.TestCase):
         self.rodar("--provas-wolfram", outro)
         p4 = self.p4_do_jsonl()[0]
         self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("vias divergem", p4["detalhe"])
+
+    def test_prova_orfa_vai_ao_relatorio_como_aviso(self):
+        self.preparar()
+        self.escrever("provas", [wolfram_p2("r#1", "r#2", "verde", onda=self.onda), wolfram_equacao("sumiu#7", "verde")])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            FI.main(["--onda", ONDA, "--raiz-esteira", self.tmp])
+        self.assertIn("prova órfã", out.getvalue())
+        texto = self.ler("fiscal-%s.md" % ONDA)
+        self.assertIn("## Avisos", texto); self.assertIn("prova órfã: equacao/sumiu#7", texto)
+        self.assertNotIn("sumiu#7", self.ler("fiscal-%s.jsonl" % ONDA))     # aviso não é linha do portão
 
     def test_provas_wolfram_malformadas_falham_alto(self):
         self.preparar()
