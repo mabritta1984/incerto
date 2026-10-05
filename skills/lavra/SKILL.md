@@ -184,6 +184,13 @@ transcrição com o ensaio do passo 8:
 python3 skills/lavra/scripts/aprovar_onda.py --onda <onda>
 ```
 
+Para o item de funções, antes do bloco, simule os nomes propostos (nada é gravado; um nome que vira
+constante em função em alguma equação listada não vai ao bloco como proposta):
+
+```
+python3 skills/lavra/scripts/extrair_equacoes.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/equacoes-<onda>.jsonl --simular-funcoes <f,F,…>
+```
+
 **Pare se** o PO não respondeu ao bloco inteiro. Se a resposta trouxe `declarar_funcoes` nova ou mudada,
 volte ao passo 4 só para reextrair com `extrair_equacoes.py --decisoes`, depois aos momentos (passo 5) e ao
 fiscal (passo 6): a função declarada muda o que parseia. Se trouxe momento novo ou mudou derivação, validade
@@ -204,10 +211,10 @@ O plano vai ao PO. **Decisão do PO antes** de gravar: `--executar` escreve no A
 python3 skills/lavra/scripts/aprovar_onda.py --onda <onda> --executar
 ```
 
-**Pare se** o ensaio ou a execução recusarem: fiscal desatualizado (volte ao passo 6), decisão malformada
-ou momento decidido fora do candidato (volte ao passo 7), equação do plano já gravada em outra onda
-(renomear é decisão do PO na rodada) ou rótulo já usado por outra equação do corpus (outro rótulo, na
-rodada). Nada foi gravado em nenhum desses casos.
+**Pare se** o ensaio ou a execução recusarem: fiscal desatualizado (volte ao passo 6), decisão malformada,
+momento decidido fora do candidato (volte ao passo 7), declaração de funções não aplicada ao candidato
+(volte ao passo 4 e reextraia), equação do plano já gravada em outra onda (renomear é decisão do PO na
+rodada) ou rótulo já usado por outra equação do corpus (outro rótulo, na rodada). Nada foi gravado em nenhum desses casos.
 
 ## Limites
 

@@ -27,7 +27,9 @@ ou decisão malformada recusa a execução (ValueError → saída com a mensagem
   declarar_funcoes      {documento, funcoes: [nomes canônicos do parser: f, F, gamma, f_1, I_x, …]} — os
                         símbolos que o PO declara funções naquele documento; quem os usa é a extração
                         (`extrair_equacoes.py --decisoes`), ANTES dos momentos e do fiscal. Um por documento;
-                        documento sem candidato na onda recusa. O plano lista, por documento, o declarado.
+                        documento sem candidato na onda recusa; candidato com `funcoes_declaradas` diferente
+                        da decisão do seu documento (sem decisão = []) recusa — reextrair. O plano lista, por
+                        documento, o declarado e, sob cada equação, a função declarada que o srepr aplica.
   renomear_variavel     {equacao, simbolo, nome}
   conceito              {nome, tipo_conceito: fenomeno|principio|falacia|regime, definicao, sinonimos, fonte}
                         (`tipo` da linha é o tipo da decisão; o do conceito vai em `tipo_conceito`)
@@ -217,6 +219,17 @@ def aplicar_momentos(equacoes, decisoes):
 
 # --- o gate -------------------------------------------------------------------------------------------------
 
+def _bytes_ordenados(nomes):
+    return sorted(nomes, key=lambda n: n.encode("utf-8"))
+
+
+def funcoes_aplicadas(candidato):
+    """As funções declaradas que o `srepr` do candidato de fato aplica (`Function('<nome>')`), ordenadas: é
+    onde a declaração virou leitura, e o que o PO confere (uma constante lida como função aparece aqui)."""
+    srepr = candidato.get("srepr") or ""
+    return _bytes_ordenados(n for n in candidato.get("funcoes_declaradas") or [] if "Function('%s')" % n in srepr)
+
+
 def _validar_equacoes(equacoes):
     vistos = set()
     for e in equacoes:
@@ -272,15 +285,23 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
             raise ValueError("momento_fechado decidido para %s não está no candidato — rode "
                              "`aprovar_onda.py --aplicar-momentos` e o fiscal de novo" % d["equacao"])
 
+    # funções declaradas: a decisão tem de ser a que a extração aplicou (`funcoes_declaradas` do candidato;
+    # ausente = []); declarada ou retirada sem reextrair, o `srepr` não é o que o PO decidiu
+    funcoes = {d["documento"]: _bytes_ordenados(d["funcoes"]) for d in por_tipo["declarar_funcoes"]}
+    desconhecidos = sorted(set(funcoes) - {e["fonte"]["documento"] for e in equacoes})
+    if desconhecidos:
+        raise ValueError("declarar_funcoes de documento sem candidato na onda: %s" % ", ".join(desconhecidos))
+    for e in equacoes:
+        doc = e["fonte"]["documento"]
+        aplicadas = _bytes_ordenados(e.get("funcoes_declaradas") or [])
+        if aplicadas != funcoes.get(doc, []):
+            raise ValueError("declaração de funções não aplicada em %s: candidato %s, decisão %s — reextraia com "
+                             "extrair_equacoes.py --decisoes" % (doc, aplicadas, funcoes.get(doc, [])))
+
     rotulos = {d["equacao"]: d["rotulo"] for d in por_tipo["rotular_equacao"]}
     desconhecidas = sorted(set(rotulos) - set(por_nome))
     if desconhecidas:
         raise ValueError("rotular_equacao de equação desconhecida: %s" % ", ".join(desconhecidas))
-    funcoes = {d["documento"]: sorted(d["funcoes"], key=lambda f: f.encode("utf-8"))
-               for d in por_tipo["declarar_funcoes"]}
-    desconhecidos = sorted(set(funcoes) - {e["fonte"]["documento"] for e in equacoes})
-    if desconhecidos:
-        raise ValueError("declarar_funcoes de documento sem candidato na onda: %s" % ", ".join(desconhecidos))
 
     nomes_var = {(e["nome"], v["simbolo"]): v["nome"] for e in equacoes for v in e.get("variaveis") or []}
     for d in por_tipo["renomear_variavel"]:
@@ -331,7 +352,7 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
                          "momento_fechado": c(e["momento_fechado"]) if e.get("momento_fechado") else None,
                          "hipoteses": None, "faixa_validade": conds, "onda": e.get("onda"), "ordem": e.get("ordem"),
                          "fonte": c(e["fonte"]), "status": status_eq[nome], "pendencias": pend, "aceites_po": aceitas,
-                         "rotulo": rotulos.get(nome)})
+                         "rotulo": rotulos.get(nome), "funcoes_aplicadas": funcoes_aplicadas(e)})
 
     # variáveis: USA, DEFINIDA_POR
     usa, definida, variaveis = [], [], {}
@@ -670,6 +691,8 @@ def linhas_do_plano(plano):
             out.append("  %-8s %s%s" % (l["status"], nome, aceite))
             out += formas(*((l["nome"],) if tipo == "equacoes" else (l["filha"], l["mae"]) if tipo == "deriva_de"
                             else (l["equacao"],)))
+            if l.get("funcoes_aplicadas"):
+                out.append("           função declarada aplicada: %s" % ", ".join(l["funcoes_aplicadas"]))
             out += ["           - %s" % p for p in l["pendencias"]]
     for tipo in ("variaveis", "usa", "definida_por", "conceitos", "heuristicas", "sustenta", "documentos"):
         aprov = sum(1 for l in plano[tipo] if l["status"] == APROVADO)

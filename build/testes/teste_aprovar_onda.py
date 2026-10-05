@@ -308,14 +308,17 @@ class TesteDeclararFuncoes(unittest.TestCase):
             por_tipo = AO.validar_decisoes([self.dec(funcoes)])
             self.assertEqual(por_tipo["declarar_funcoes"], [self.dec(funcoes)])
         self.assertIn("declarar_funcoes", AO.TIPOS_DECISAO)
-        plano = AO.decidir([eq_fixa("a")], [], [], [p1("a")], [self.dec()])
+        plano = AO.decidir([eq_fixa("a", funcoes_declaradas=["F", "H", "f", "gamma"])], [], [], [p1("a")], [self.dec()])
         self.assertEqual(plano["equacoes"][0]["status"], "aprovado")
 
     def test_malformada_e_recusada(self):
         for d in (self.dec([]), self.dec(["f", "f"]), self.dec(["f'"]), self.dec(["S^N"]), self.dec(["1f"]),
                   self.dec(["f_"]), self.dec([""]), self.dec([3]), self.dec("f"), self.dec(documento=""),
                   self.dec(documento="  "), self.dec(documento=None), self.dec(extra=1),
-                  {"tipo": "declarar_funcoes", "documento": DOC}):
+                  {"tipo": "declarar_funcoes", "documento": DOC},
+                  # nome de função de marcação explícita (`\mathbb{E}`, `E[…]`, `\operatorname{Var}`): fundiria
+                  # o operador com a função do PO
+                  self.dec(["E"]), self.dec(["f", "Var"])):
             with self.subTest(d=d), self.assertRaises(ValueError):
                 AO.validar_decisoes([d])
 
@@ -332,12 +335,50 @@ class TesteDeclararFuncoes(unittest.TestCase):
 
     def test_plano_lista_as_funcoes_declaradas_por_documento(self):
         outro = eq_fixa("b", fonte={"documento": "Outro.pdf.md", "topico": "T"})
-        plano = AO.decidir([eq_fixa("a"), outro], [], [], [p1("a"), p1("b")], [self.dec(["gamma", "F", "f"])])
+        a = eq_fixa("a", funcoes_declaradas=["F", "f", "gamma"])
+        plano = AO.decidir([a, outro], [], [], [p1("a"), p1("b")], [self.dec(["gamma", "F", "f"])])
         funcoes = {d["nome"]: d["funcoes_declaradas"] for d in plano["documentos"]}
         self.assertEqual(funcoes, {DOC: ["F", "f", "gamma"], "Outro.pdf.md": []})
         texto = "\n".join(AO.linhas_do_plano(plano))
         self.assertIn("%s: F, f, gamma" % DOC, texto)
         self.assertIn("Outro.pdf.md: nenhuma", texto)
+
+    def test_declaracao_nao_aplicada_ao_candidato_recusa(self):
+        # o PO declara (ou retira) e esquece de reextrair: o gate não aprova o que foi extraído com outra lista
+        c_e_f = dict(EQ.candidato({"documento": DOC, "topico": "T", "ordem": 1, "latex": r"x = C(n + 1)"},
+                                  ONDA, frozenset({"C", "F"})), nome="a", corpus=PARTICAO)
+        self.assertIn("Function('C')", c_e_f["srepr"])
+        casos = ((c_e_f, [self.dec(["F"])], "['C', 'F']", "['F']"),         # C retirada, não reextraída
+                 (c_e_f, [], "['C', 'F']", "[]"),                            # decisão inteira retirada
+                 (eq_fixa("a"), [self.dec(["F"])], "[]", "['F']"),           # declarada, não reextraída
+                 (eq_fixa("a", funcoes_declaradas=["F"]), [self.dec(["F", "f"])], "['F']", "['F', 'f']"))
+        for e, decs, candidato, decisao in casos:
+            with self.subTest(decs=decs, candidato=candidato), self.assertRaises(ValueError) as c:
+                AO.decidir([e], [], [], [p1("a")], decs)
+            msg = str(c.exception)
+            self.assertIn("declaração de funções não aplicada em %s" % DOC, msg)
+            self.assertIn("candidato %s, decisão %s" % (candidato, decisao), msg)
+            self.assertIn("extrair_equacoes.py --decisoes", msg)
+
+    def test_declaracao_aplicada_passa(self):
+        for e, decs in ((eq_fixa("a"), []), (eq_fixa("a", funcoes_declaradas=[]), []),
+                        (eq_fixa("a", funcoes_declaradas=["F", "f"]), [self.dec(["f", "F"])])):
+            with self.subTest(e=e.get("funcoes_declaradas"), decs=decs):
+                self.assertEqual(AO.decidir([e], [], [], [p1("a")], decs)["equacoes"][0]["status"], "aprovado")
+
+    def test_plano_mostra_a_funcao_declarada_aplicada_em_cada_equacao(self):
+        # tirado do srepr do candidato: o PO vê onde a declaração virou aplicação (o `C` constante da eq. 13)
+        latex13 = r"x^* = C\left(\frac{n - 1}{n + 1}\right)^{1/n}"
+        e13 = dict(EQ.candidato({"documento": DOC, "topico": "T", "ordem": 13, "latex": latex13}, ONDA,
+                                frozenset({"C", "F"})), nome="a", corpus=PARTICAO)
+        b = eq_fixa("b", funcoes_declaradas=["C", "F"])
+        plano = AO.decidir([e13, b], [], [], [p1("a"), p1("b")], [self.dec(["C", "F"])])
+        self.assertEqual({e["nome"]: e["funcoes_aplicadas"] for e in plano["equacoes"]}, {"a": ["C"], "b": []})
+        linhas = AO.linhas_do_plano(plano)
+        i = linhas.index("  aprovado a")
+        self.assertIn("função declarada aplicada: C", "\n".join(linhas[i:i + 4]))
+        j = linhas.index("  aprovado b")
+        self.assertNotIn("função declarada aplicada", "\n".join(linhas[j:j + 3]))
 
 
 class TesteRotular(unittest.TestCase):

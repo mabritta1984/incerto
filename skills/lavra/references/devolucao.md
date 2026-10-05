@@ -32,9 +32,25 @@ todo o resto segue a regra estrita. O item mostra o documento, os símbolos prop
 parser: `gamma` para `\gamma`, `f_1`, `I_x`, `n_F`) e as perdas `nao_suportado:<f>(` desse documento que a
 declaração resolve. Nome declarado que o documento também usa como variável (o `f` de Kelly) vira perda
 `nao_suportado:uso_misto:<f>` nas equações onde aparece dos dois jeitos — o item avisa. Uma linha por
-documento; `funcoes` lista não vazia, sem repetição. Diferente das outras decisões, esta muda os candidatos:
-depois da resposta, o rito volta à extração (passo 4, `extrair_equacoes.py --decisoes …`), depois aos
-momentos (passo 5) e ao fiscal (passo 6).
+documento; `funcoes` lista não vazia, sem repetição; `E` e `Var` (funções da marcação explícita, que o
+fiscal lê como momento) não se declaram.
+
+**Antes de declarar, o PO roda a simulação** — não grava nada e mostra, para cada nome proposto, as equações
+de cada documento que passariam a parsear com ele (ou deixariam de parsear), com o LaTeX e o `srepr`:
+
+```
+python3 skills/lavra/scripts/extrair_equacoes.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/equacoes-<onda>.jsonl --simular-funcoes f,F,gamma,H
+```
+
+A declaração vale para o documento inteiro: um nome que, em alguma equação listada, transforma uma
+**constante** em função **não é declarado** — o `C` de Convex_Responses é constante (ponto de inflexão de
+`H`), e declarado faria a eq. 13, `x^* = C\left(\frac{n-1}{n+1}\right)^{1/n}`, parsear como `C(…)`. O item do
+bloco traz a saída da simulação dos nomes propostos.
+
+Diferente das outras decisões, esta muda os candidatos: depois da resposta, o rito volta à extração (passo
+4, `extrair_equacoes.py --decisoes …`), depois aos momentos (passo 5) e ao fiscal (passo 6). A aprovação
+recusa candidato extraído com outra lista de funções que a decidida (declarada ou retirada sem reextrair), e
+o plano mostra, sob cada equação, a "função declarada aplicada" tirada do `srepr`.
 
 ```jsonl
 {"documento": "<documento>.pdf.md", "funcoes": ["f", "F", "gamma", "H"], "tipo": "declarar_funcoes"}

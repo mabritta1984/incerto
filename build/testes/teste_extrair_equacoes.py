@@ -293,6 +293,49 @@ class TesteFuncoesDeclaradas(unittest.TestCase):
         a = parsear_latex(CONVEX_1, funcoes=frozenset({"F", "f"}))
         self.assertEqual(a, parsear_latex(CONVEX_1, funcoes=frozenset({"f", "F", "H"})))
 
+    def test_nome_de_funcao_de_marcacao_nao_se_funde_com_o_declarado(self):
+        # `\mathbb{E}[X] + E(x)` com `E` declarada fundiria a esperança com a função do PO; o validador recusa
+        # `E` e `Var`, e o parser recusa qualquer nome declarado que a marcação explícita também produziu
+        for latex, funcoes, nome in ((r"y = \mathbb{E}[X] + E(x)", {"E"}, "E"),
+                                     (r"y = \operatorname{G}(X) + G(x)", {"G"}, "G")):
+            with self.subTest(latex=latex):
+                r = parsear_latex(latex, funcoes=frozenset(funcoes))
+                self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:funcao_de_marcacao:" + nome)
+        self.assertTrue(parsear_latex(r"y = \mathbb{E}[X] + f(x)", funcoes=frozenset({"f"}))["ok"])
+        for nome in ("E", "Var"):
+            with self.assertRaises(ValueError):
+                EQ.validar_declaracao_funcoes({"tipo": "declarar_funcoes", "documento": "A.pdf.md", "funcoes": [nome]})
+
+
+# Convex_Responses.pdf, eqs. (11) e (13): `C` é constante (ponto de inflexão de H); declarada função, a (13)
+# passaria a parsear como `C(…)` — leitura errada que a simulação mostra ao PO antes de declarar
+CONVEX_11 = r"H(x) = \frac{E_1 - E_0}{1 + \left(\frac{C}{x}\right)^n} + E_0 \tag{11}"
+CONVEX_13 = r"x^* = C\left(\frac{n - 1}{n + 1}\right)^{1/n} \tag{13}"
+
+
+class TesteSimularFuncoes(unittest.TestCase):
+    def eqs(self, *latex, documento="Convex_Responses.pdf.md"):
+        return [{"documento": documento, "topico": "T", "ordem": i, "latex": l} for i, l in enumerate(latex, 1)]
+
+    def test_constante_c_da_eq_13_aparece_como_funcao_e_a_11_deixa_de_parsear(self):
+        eqs = self.eqs(CONVEX_11, CONVEX_13)
+        doc = "Convex_Responses.pdf.md"
+        sim = EQ.simular_funcoes(eqs, {doc: frozenset({"H"})}, frozenset({"C"}))
+        self.assertEqual([(s["nome"], s["equacao"], s["efeito"]) for s in sim],
+                         [("C", doc + "#1", "deixaria_de_parsear"), ("C", doc + "#2", "passaria_a_parsear")])
+        self.assertEqual(sim[0]["motivo"], "nao_suportado:uso_misto:C")
+        self.assertEqual(sim[1]["latex"], CONVEX_13)
+        self.assertIn("Function('C')", sim[1]["srepr"])
+
+    def test_cada_nome_proposto_lista_as_equacoes_em_que_e_aplicado(self):
+        eqs = self.eqs(CONVEX_1, r"\sigma^2 = p(1-p)") + self.eqs(CONVEX_1, documento="B.pdf.md")
+        sim = EQ.simular_funcoes(eqs, {}, frozenset({"f", "F"}))
+        self.assertEqual([(s["nome"], s["equacao"], s["efeito"]) for s in sim],
+                         [("F", "B.pdf.md#1", "passaria_a_parsear"), ("F", "Convex_Responses.pdf.md#1", "passaria_a_parsear"),
+                          ("f", "B.pdf.md#1", "passaria_a_parsear"), ("f", "Convex_Responses.pdf.md#1", "passaria_a_parsear")])
+        self.assertEqual(EQ.simular_funcoes(eqs, {}, frozenset({"F"})), [])     # sem `f`, a (1) segue perda
+
+
 
 class TesteDocumento(unittest.TestCase):
     def test_equacoes_do_documento_herdam_topico(self):
@@ -503,6 +546,24 @@ class TesteCLIFuncoes(unittest.TestCase):
             self.rodar("--decisoes", os.path.join(self.raiz, "nao-existe.jsonl"))
         self.assertIn("nao-existe.jsonl", str(c.exception.code))
         self.assertFalse(os.path.exists(self.saida))
+
+    def test_simular_funcoes_imprime_e_nao_grava(self):
+        conf = os.path.join(self.raiz, "conferidos", self.ONDA_F)
+        with io.open(os.path.join(conf, "C.pdf.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("## Inflexao\n\n$$%s$$\n\n$$%s$$\n" % (CONVEX_11, CONVEX_13))
+        self.escrever_decisoes(self.decisoes, [{"tipo": "declarar_funcoes", "documento": "C.pdf.md", "funcoes": ["H"]}])
+        saida = io.StringIO()
+        with contextlib.redirect_stdout(saida):
+            self.assertEqual(EQ.main(["--raiz", self.raiz, "--onda", self.ONDA_F, "--saida", self.saida,
+                                      "--simular-funcoes", "C,F,f"]), 0)
+        texto = saida.getvalue()
+        self.assertFalse(os.path.exists(self.saida))                    # simulação não grava nada
+        self.assertIn("C.pdf.md#2", texto); self.assertIn(CONVEX_13, texto)
+        self.assertIn("passaria a parsear", texto); self.assertIn("deixaria de parsear", texto)
+        self.assertIn("A.pdf.md#1", texto)                               # F e f na eq. (1) de A e de B
+        for ruim in ("E", "C,C", "S^N", ""):
+            with self.subTest(ruim=ruim), self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                self.rodar("--simular-funcoes", ruim)
 
 
 class TestePortao(unittest.TestCase):

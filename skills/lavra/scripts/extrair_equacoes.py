@@ -331,6 +331,11 @@ def _parsear(latex, funcoes):
         nome = type(f).__name__
         if nome not in funcoes_de and nome not in ("max", "min") and _canonico(nome) not in funcoes:
             return _perda("nao_suportado:%s(" % _canonico(nome))
+    # o nome declarado que a marcação explícita também produziu (`\mathbb{E}[X] + E(x)` com `E` declarada):
+    # fundiria o operador com a função do PO; perda
+    marcados = sorted(funcoes & set(funcoes_de.values()), key=_bytes)
+    if marcados:
+        return _perda("nao_suportado:funcao_de_marcacao:%s" % marcados[0])
     # o nome declarado função que aparece também como símbolo (`f(x) = x f`): qual das leituras vale? perda
     misto = sorted(funcoes & {simbolos_de.get(s.name, _canonico(s.name)) for s in expr.atoms(Symbol)}, key=_bytes)
     if misto:
@@ -376,6 +381,19 @@ def _parsear(latex, funcoes):
 # `I_x`, `n_F`, `T_max`, `f_star`); é a sintaxe dos nomes da decisão `declarar_funcoes`
 RE_NOME_SIMBOLO = re.compile(r"^[A-Za-z]+(?:_[A-Za-z0-9]+)?$")
 CAMPOS_DECLARAR_FUNCOES = ("documento", "funcoes", "tipo")
+# nomes de função que a marcação explícita produz (`\mathbb{E}[…]`, `E[…]`, `\operatorname{Var}(…)`) e que o
+# fiscal lê como momento: declará-los fundiria o operador com a função do PO (o parser recusa também, na
+# equação, qualquer outro nome declarado que um `\operatorname{…}` produziu)
+FUNCOES_DE_MARCACAO = ("E", "Var")
+
+
+def validar_nome_de_funcao(nome):
+    """ValueError se `nome` não pode ser declarado função: fora de `RE_NOME_SIMBOLO` ou nome de marcação."""
+    if not isinstance(nome, str) or not RE_NOME_SIMBOLO.match(nome):
+        raise ValueError("nome de função fora da sintaxe dos símbolos do parser (%s): %r"
+                         % (RE_NOME_SIMBOLO.pattern, nome))
+    if nome in FUNCOES_DE_MARCACAO:
+        raise ValueError("%r é função de marcação explícita (esperança/variância), não se declara" % nome)
 
 
 def validar_declaracao_funcoes(d, onde="declarar_funcoes"):
@@ -389,10 +407,11 @@ def validar_declaracao_funcoes(d, onde="declarar_funcoes"):
     funcoes = d["funcoes"]
     if not isinstance(funcoes, list) or not funcoes:
         raise ValueError("%s: `funcoes` tem de ser lista não vazia de nomes" % onde)
-    ruins = [f for f in funcoes if not isinstance(f, str) or not RE_NOME_SIMBOLO.match(f)]
-    if ruins:
-        raise ValueError("%s: nome de função fora da sintaxe dos símbolos do parser (%s): %r"
-                         % (onde, RE_NOME_SIMBOLO.pattern, ruins[0]))
+    for f in funcoes:
+        try:
+            validar_nome_de_funcao(f)
+        except ValueError as e:
+            raise ValueError("%s: %s" % (onde, e))
     if len(set(funcoes)) != len(funcoes):
         raise ValueError("%s: nome de função repetido em `funcoes`" % onde)
 
@@ -409,6 +428,35 @@ def funcoes_por_documento(decisoes):
             raise ValueError("decisão declarar_funcoes repetida: %s" % d["documento"])
         por_doc[d["documento"]] = frozenset(d["funcoes"])
     return por_doc
+
+
+def simular_funcoes(eqs, declaradas, propostas):
+    """O que declarar `propostas` (além das `declaradas` de cada documento) mudaria, sem gravar nada: uma
+    linha por (nome proposto, equação) — `passaria_a_parsear` quando a equação só parseia com elas e o `srepr`
+    aplica aquele nome (`Function('<nome>')`), `deixaria_de_parsear` quando parseava e deixa de parsear por
+    causa dele (`uso_misto`, `funcao_de_marcacao`). `eqs` no formato de `equacoes_do_documento`. Ordenado por
+    nome, documento e ordem (bytes). É o que o PO lê antes de declarar: um nome que transforma uma constante
+    em função (o `C` da eq. 13 de Convex_Responses) aparece aqui com o LaTeX e o `srepr`."""
+    propostas = frozenset(propostas)
+    linhas = []
+    for eq in eqs:
+        base = frozenset(declaradas.get(eq["documento"], frozenset()))
+        antes, depois = parsear_latex(eq["latex"], base), parsear_latex(eq["latex"], base | propostas)
+        nome_eq = "%s#%d" % (eq["documento"], eq["ordem"])
+        if not antes["ok"] and depois["ok"]:
+            efeito = "passaria_a_parsear"
+            nomes = [n for n in propostas if "Function('%s')" % n in depois["srepr"]]
+        elif antes["ok"] and not depois["ok"]:
+            efeito = "deixaria_de_parsear"
+            culpado = depois["motivo"].rsplit(":", 1)[-1]
+            nomes = [culpado] if culpado in propostas else sorted(propostas)
+        else:
+            continue
+        for n in nomes:
+            linhas.append({"nome": n, "documento": eq["documento"], "ordem": eq["ordem"], "equacao": nome_eq,
+                           "efeito": efeito, "latex": eq["latex"], "srepr": depois["srepr"],
+                           "motivo": depois["motivo"]})
+    return sorted(linhas, key=lambda l: (_bytes(l["nome"]), _bytes(l["documento"]), l["ordem"]))
 
 
 def equacoes_do_documento(md, documento, nivel=2):
@@ -479,7 +527,23 @@ def main(argv=None):
     ap.add_argument("--decisoes", help="decisões do PO (default: decisoes-<onda>.jsonl na pasta da --saida, lido só "
                                        "se existir); as `declarar_funcoes` dizem que símbolos são funções em cada "
                                        "documento")
+    ap.add_argument("--simular-funcoes", metavar="F,C,…",
+                    help="não grava: para cada nome proposto, lista as equações de cada documento que passariam a "
+                         "parsear com ele declarado função (ou deixariam de parsear), com LaTeX e srepr — o PO roda "
+                         "antes de declarar")
     args = ap.parse_args(argv)
+    propostas = None
+    if args.simular_funcoes is not None:
+        propostas = [n.strip() for n in args.simular_funcoes.split(",")]
+        try:
+            if not any(propostas):
+                raise ValueError("lista vazia")
+            for n in propostas:
+                validar_nome_de_funcao(n)
+            if len(set(propostas)) != len(propostas):
+                raise ValueError("nome repetido")
+        except ValueError as e:
+            ap.error("--simular-funcoes: %s" % e)
     if not recortar_trechos.RE_ONDA.match(args.onda) or ".." in args.onda:
         ap.error("--onda inválida: use ^[A-Za-z0-9][A-Za-z0-9._-]*$ sem '..'")
     dir_onda = os.path.join(args.raiz, "conferidos", args.onda)
@@ -506,6 +570,22 @@ def main(argv=None):
     fora = sorted(set(funcoes) - {doc for _, doc, _ in documentos}, key=_bytes)
     if fora:
         sys.exit("recusado, nada gravado — declarar_funcoes de documento fora de %s: %s" % (dir_onda, ", ".join(fora)))
+
+    if propostas is not None:
+        eqs = []
+        for caminho, doc, _ in documentos:
+            with io.open(caminho, encoding="utf-8", newline="") as f:
+                eqs += equacoes_do_documento(f.read(), doc, args.nivel)
+        sim = simular_funcoes(eqs, funcoes, propostas)
+        print("simulação (nada gravado) — funções propostas: %s" % ", ".join(sorted(propostas, key=_bytes)))
+        for n in sorted(propostas, key=_bytes):
+            do_nome = [l for l in sim if l["nome"] == n]
+            print("%s: %d equação(ões)" % (n, len(do_nome)))
+            for l in do_nome:
+                print("  %s %s — LaTeX: %s" % (l["equacao"], l["efeito"].replace("_", " "),
+                                                l["latex"].replace("\n", " ")))
+                print("      %s" % (l["srepr"] if l["srepr"] else l["motivo"]))
+        return 0
 
     cands = []
     for caminho, doc, _ in documentos:
