@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "incerto-consulta": {
+      "command": "${INCERTO_PYTHON:-python}",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/consulta_incerto.py"]
+    }
+  }
+}
