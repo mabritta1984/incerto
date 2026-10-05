@@ -73,8 +73,16 @@ símbolos da equação, traduzidos pelo nome da variável); uma condição sobre
 arestas com a mesma `condicao`. Condição que não cita variável da equação não gera aresta (aviso no plano).
 
 Reaprovar a onda **substitui** as arestas que saem das equações dela (`USA`, `VALIDA_SOB`, `DERIVA_DE`,
-`DEFINIDA_POR` que chega nelas) e os `SUSTENTA` das heurísticas dela: nada de uma rodada anterior
-sobrevive como `aprovado`. Nós que saíram da onda não são apagados (exceto variável órfã).
+`DEFINIDA_POR` que chega nelas) e os `SUSTENTA` das heurísticas dela, e **rebaixa** — nunca apaga — todo
+nó `{corpus, onda}` da onda (`:Equacao`, `:Conceito`, `:Heuristica`) que o plano atual não grava (equação
+que saiu de `equacoes-`, conceito ou heurística cuja decisão saiu de `decisoes-`): `status: 'staging'`,
+`pendencias: ["fora da rodada atual"]`. Nada de uma rodada anterior sobrevive como `aprovado`. Só a
+variável órfã é apagada.
+
+**A `onda` do nó é confiável porque é conferida.** `carregar_onda` recusa, antes de abrir o banco, todo
+candidato cuja `onda` difira de `--onda`. E, como `:Equacao` é chaveada por `{corpus, nome}` (sem a onda),
+antes de qualquer escrita a aprovação consulta as equações do plano já no banco e **recusa sem gravar
+nada** se alguma estiver em outra onda, nomeando nome e onda: o PO resolve renomeando na rodada.
 
 ## Gate do fiscal (`aprovar_onda.decidir`, função pura)
 
@@ -120,8 +128,9 @@ python3 skills/lavra/scripts/aprovar_onda.py --onda <onda> --aplicar-momentos
     [--corpus incerto] [--raiz-esteira _esteira/incerto] [--database <db>]
 ```
 
-Sem `--executar` o banco nem é aberto. Com ele, a ordem é: limpar as arestas da onda → nós → arestas →
-variáveis órfãs → status das variáveis.
+Sem `--executar` o banco nem é aberto. Com ele, a ordem é: recusar colisão de nome com outra onda →
+rebaixar os nós da onda fora do plano → limpar as arestas da onda → nós → arestas → variáveis órfãs →
+status das variáveis.
 
 ## Cypher canônico
 
@@ -137,6 +146,21 @@ MERGE (t:Trecho {corpus: $corpus, documento: l.documento, topico: l.topico, part
 SET t.texto = l.texto, t.onda = l.onda, t.ordem = l.ordem, t.embedding_gemini = l.embedding,
     t.junta = l.junta, t.cabecalho = l.cabecalho
 MERGE (t)-[:PERTENCE_A]->(d)
+```
+
+Aprovação — colisão com outra onda (recusa se devolver linha) e rebaixamento:
+
+```cypher
+MATCH (e:Equacao {corpus: $corpus}) WHERE e.nome IN $nomes AND e.onda <> $onda
+RETURN e.nome, e.onda ORDER BY e.nome
+
+MATCH (n {corpus: $corpus, onda: $onda}) WHERE n:Equacao OR n:Conceito OR n:Heuristica
+RETURN [r IN labels(n) WHERE r IN ['Equacao', 'Conceito', 'Heuristica']][0], n.nome ORDER BY n.nome
+// o que não está no plano (aprovar_onda.a_rebaixar) vai em $linhas [{rotulo, nome}]:
+UNWIND $linhas AS l
+MATCH (n {corpus: $corpus, onda: $onda, nome: l.nome})
+WHERE l.rotulo IN labels(n)
+SET n.status = 'staging', n.pendencias = [$pendencia]          // "fora da rodada atual"
 ```
 
 Aprovação — limpeza das arestas da onda (três comandos):

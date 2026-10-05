@@ -403,7 +403,8 @@ def arquivo(raiz, prefixo, onda):
 
 
 def carregar_onda(raiz, onda, corpus):
-    """Os arquivos da onda; ValueError se faltar candidato ou fiscal, ou se o corpus divergir."""
+    """Os arquivos da onda; ValueError se faltar candidato ou fiscal, ou se o corpus ou a onda de um
+    candidato divergirem (a limpeza e o rebaixamento no banco confiam na `onda` gravada no nó)."""
     for prefixo in ("equacoes", "fiscal"):
         if not os.path.exists(arquivo(raiz, prefixo, onda)):
             raise ValueError("não existe %s — rode %s antes" % (arquivo(raiz, prefixo, onda),
@@ -413,6 +414,8 @@ def carregar_onda(raiz, onda, corpus):
     for e in dados["equacoes"]:
         if e.get("corpus") != corpus:
             raise ValueError("candidato %s é do corpus %r, não de --corpus %r" % (e.get("nome"), e.get("corpus"), corpus))
+        if e.get("onda") != onda:
+            raise ValueError("candidato %s é da onda %r, não de --onda %r" % (e.get("nome"), e.get("onda"), onda))
     dados["wolfram"] = fiscal.provas_wolfram(arquivo(raiz, "provas", onda))
     return dados
 
@@ -435,6 +438,23 @@ CYPHER_LIMPAR_ARESTAS = (
     "MATCH ()-[r:DEFINIDA_POR]->(e:Equacao {corpus: $corpus, onda: $onda}) DELETE r",
     "MATCH (h:Heuristica {corpus: $corpus, onda: $onda})-[r:SUSTENTA]->() DELETE r",
 )
+
+# `:Equacao` é chaveada por {corpus, nome}: se o nome já existe em outra onda, o MERGE tomaria o nó dela
+CYPHER_COLISOES = ("MATCH (e:Equacao {corpus: $corpus}) WHERE e.nome IN $nomes AND e.onda <> $onda "
+                   "RETURN e.nome, e.onda ORDER BY e.nome")
+
+# nós da onda (com `onda` gravada) que já estão no banco: o que não está no plano atual é rebaixado
+CYPHER_NOS_DA_ONDA = ("MATCH (n {corpus: $corpus, onda: $onda}) WHERE n:Equacao OR n:Conceito OR n:Heuristica "
+                      "RETURN [r IN labels(n) WHERE r IN ['Equacao', 'Conceito', 'Heuristica']][0], n.nome "
+                      "ORDER BY n.nome")
+
+PENDENCIA_FORA = "fora da rodada atual"
+CYPHER_REBAIXAR = """
+UNWIND $linhas AS l
+MATCH (n {corpus: $corpus, onda: $onda, nome: l.nome})
+WHERE l.rotulo IN labels(n)
+SET n.status = 'staging', n.pendencias = [$pendencia]
+"""
 
 CYPHER_DOCUMENTOS = """
 UNWIND $linhas AS l
@@ -528,13 +548,33 @@ SET r.status = l.status, r.fonte = l.fonte
 CYPHER_SUSTENTA_EQUACAO = CYPHER_SUSTENTA_CONCEITO.replace("(x:Conceito", "(x:Equacao")
 
 
+def a_rebaixar(existentes, plano):
+    """[(rotulo, nome)] dos nós da onda já no banco (`existentes`) que o plano atual não grava: equação que
+    saiu de `equacoes-`, conceito ou heurística cuja decisão saiu de `decisoes-`. Rebaixados, nunca apagados."""
+    no_plano = {("Equacao", l["nome"]) for l in plano["equacoes"]} | \
+               {("Conceito", l["nome"]) for l in plano["conceitos"]} | \
+               {("Heuristica", l["nome"]) for l in plano["heuristicas"]}
+    return sorted({(r, n) for r, n in existentes} - no_plano)
+
+
 def gravar(cred, db, plano, corpus, onda, saida=print):
-    """Grava o plano em lotes, na ordem nós → arestas; reaprovar a onda substitui as arestas das equações
-    dela (nada fica de uma rodada anterior)."""
+    """Grava o plano em lotes, na ordem nós → arestas. Antes de qualquer escrita, recusa (ValueError) se um
+    nome de equação do plano já existe no banco em outra onda. Reaprovar a onda substitui as arestas dela e
+    rebaixa a `staging` o nó da onda que saiu da rodada (nada fica `aprovado` de uma rodada anterior)."""
     def lote(cypher, linhas, extra=None):
         if linhas:
             nucleo.query_com_retentativa(cred, db, cypher, dict({"corpus": corpus, "linhas": linhas}, **(extra or {})))
 
+    colisoes = nucleo.query_com_retentativa(cred, db, CYPHER_COLISOES, {
+        "corpus": corpus, "onda": onda, "nomes": [l["nome"] for l in plano["equacoes"]]})
+    if colisoes:
+        raise ValueError("equação já existe no grafo em outra onda — renomeie na rodada: %s"
+                         % "; ".join("%s (onda %s)" % (n, o) for n, o in colisoes))
+    existentes = nucleo.query_com_retentativa(cred, db, CYPHER_NOS_DA_ONDA, {"corpus": corpus, "onda": onda})
+    rebaixar = a_rebaixar([tuple(r) for r in existentes], plano)
+    lote(CYPHER_REBAIXAR, [{"rotulo": r, "nome": n} for r, n in rebaixar], {"onda": onda, "pendencia": PENDENCIA_FORA})
+    for r, n in rebaixar:
+        saida("rebaixado a staging (%s): %s %s" % (PENDENCIA_FORA, r, n))
     for cypher in CYPHER_LIMPAR_ARESTAS:
         nucleo.query_com_retentativa(cred, db, cypher, {"corpus": corpus, "onda": onda})
     lote(CYPHER_DOCUMENTOS, plano["documentos"])
@@ -576,10 +616,15 @@ def linhas_do_plano(plano):
 
 def _gravar_jsonl(caminho, linhas):
     temporario = caminho + ".tmp"
-    with io.open(temporario, "w", encoding="utf-8", newline="\n") as f:
-        for l in linhas:
-            f.write(json.dumps(l, sort_keys=True, ensure_ascii=False) + "\n")
-    os.replace(temporario, caminho)
+    try:
+        with io.open(temporario, "w", encoding="utf-8", newline="\n") as f:
+            for l in linhas:
+                f.write(json.dumps(l, sort_keys=True, ensure_ascii=False) + "\n")
+        os.replace(temporario, caminho)
+    except BaseException:
+        if os.path.exists(temporario):
+            os.remove(temporario)
+        raise
 
 
 def main(argv=None, banco=None):
@@ -628,7 +673,10 @@ def main(argv=None, banco=None):
         print("nada gravado (sem --executar)")
         return 0
     cred, db = banco if banco else nucleo.abrir_banco(a.database)[:2]
-    gravar(cred, db, plano, a.corpus, a.onda)
+    try:
+        gravar(cred, db, plano, a.corpus, a.onda)
+    except ValueError as e:
+        sys.exit("recusado — %s" % e)
     return 0
 
 

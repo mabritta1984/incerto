@@ -375,6 +375,17 @@ class TesteCli(BaseOnda):
             self.onda.aprovar()
         self.assertIn("corpus", str(c.exception.code))
 
+    def test_candidato_de_outra_onda_recusa_antes_do_banco(self):
+        self.onda.equacoes[1]["onda"] = "2026-10-OUTRA"
+        self.onda.gravar(fiscal=False)
+        escrever_jsonl(self.onda.arquivo("fiscal"), [])
+        with self.assertRaises(ValueError) as c:
+            AO.carregar_onda(self.tmp, ONDA, PARTICAO)
+        self.assertIn("2026-10-OUTRA", str(c.exception))
+        with mock.patch.object(AO.nucleo, "abrir_banco", side_effect=AssertionError("abriu o banco")):
+            with self.assertRaises(SystemExit):
+                self.onda.aprovar("--executar")
+
     def test_plano_da_onda_de_verdade(self):
         self.onda.gravar()
         dados = AO.carregar_onda(self.tmp, ONDA, PARTICAO)
@@ -384,6 +395,28 @@ class TesteCli(BaseOnda):
         self.assertEqual(deriva, {("Kelly.pdf.md#1", "Kelly.pdf.md#2"): "aprovado",
                                   ("Kelly.pdf.md#1", "Kelly.pdf.md#3"): "staging",
                                   ("Ramo.pdf.md#1", "Ramo.pdf.md#2"): "staging"})
+
+
+class TesteRebaixar(unittest.TestCase):
+    def test_no_da_onda_fora_do_plano_e_rebaixado(self):
+        dec = [{"tipo": "conceito", "nome": "ruina", "tipo_conceito": "fenomeno", "definicao": "d", "sinonimos": [],
+                "fonte": {"documento": DOC, "topico": "T"}}]
+        plano = AO.decidir([eq_fixa("a")], [], [], [p1("a")], dec)
+        existentes = [("Equacao", "a"), ("Equacao", "velha"), ("Conceito", "ruina"), ("Conceito", "antigo"),
+                      ("Heuristica", "h"), ("Conceito", "a")]
+        self.assertEqual(AO.a_rebaixar(existentes, plano),
+                         [("Conceito", "a"), ("Conceito", "antigo"), ("Equacao", "velha"), ("Heuristica", "h")])
+        self.assertEqual(AO.a_rebaixar([("Equacao", "a"), ("Conceito", "ruina")], plano), [])
+
+
+class TesteGravarJsonl(unittest.TestCase):
+    def test_falha_nao_deixa_temporario(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        caminho = os.path.join(tmp, "equacoes-x.jsonl")
+        with self.assertRaises(TypeError):
+            AO._gravar_jsonl(caminho, [{"ok": 1}, {"ruim": object()}])
+        self.assertEqual(os.listdir(tmp), [])
 
 
 class TesteAplicarMomentos(BaseOnda):
@@ -499,6 +532,35 @@ class TesteBancoReal(BaseOnda):
         self.assertEqual([u[0] for u in usadas], ["f", "odds", "p"])
         self.assertEqual(self.q("MATCH (:Equacao {corpus: $c, nome: 'Kelly.pdf.md#2'})-[:VALIDA_SOB]->(v) "
                                 "RETURN v.nome"), [["odds"]])
+
+    def test_reaprovar_sem_a_equacao_ou_o_conceito_rebaixa_nunca_apaga(self):
+        self.onda.decisoes = [{"tipo": "conceito", "nome": "ruina", "tipo_conceito": "fenomeno", "definicao": "d",
+                               "sinonimos": [], "fonte": {"documento": DOC, "topico": "T"}}]
+        self.onda.gravar()
+        self.executar()
+        st = "MATCH (n:%s {corpus: $c, nome: '%s'}) RETURN n.status, n.pendencias"
+        self.assertEqual(self.q(st % ("Equacao", "Ramo.pdf.md#1"))[0][0], "aprovado")
+        self.assertEqual(self.q(st % ("Conceito", "ruina"))[0][0], "aprovado")
+        self.onda.equacoes = [e for e in self.onda.equacoes if not e["nome"].startswith("Ramo")]
+        self.onda.derivacoes = [d for d in self.onda.derivacoes if not d["mae"].startswith("Ramo")]
+        self.onda.wolfram = [w for w in self.onda.wolfram if not w[0].startswith("Ramo")]
+        self.onda.decisoes = []
+        self.onda.gravar()
+        self.executar()
+        for rotulo, nome in (("Equacao", "Ramo.pdf.md#1"), ("Equacao", "Ramo.pdf.md#2"), ("Conceito", "ruina")):
+            self.assertEqual(self.q(st % (rotulo, nome)), [["staging", ["fora da rodada atual"]]], nome)
+        self.assertEqual(self.q(st % ("Equacao", "Kelly.pdf.md#2"))[0][0], "aprovado")
+        self.assertEqual(self.q("MATCH (:Equacao {corpus: $c, nome: 'Ramo.pdf.md#2'})-[r]->() RETURN count(r)"), [[0]])
+
+    def test_nome_de_equacao_de_outra_onda_recusa_sem_gravar(self):
+        NUC.query_api(self.cred, self.db, "CREATE (:Equacao {corpus: $c, nome: 'Kelly.pdf.md#2', onda: 'outra', "
+                      "status: 'aprovado', fonte: '{}'})", {"c": PARTICAO})
+        self.onda.gravar()
+        with self.assertRaises(SystemExit) as c:
+            self.onda.aprovar("--executar", banco=(self.cred, self.db))
+        self.assertIn("Kelly.pdf.md#2 (onda outra)", str(c.exception.code))
+        self.assertEqual(self.q("MATCH (n {corpus: $c}) RETURN count(n)"), [[1]])
+        self.assertEqual(self.q("MATCH (n {corpus: $c}) RETURN n.onda, n.status"), [["outra", "aprovado"]])
 
 
 if __name__ == "__main__":
