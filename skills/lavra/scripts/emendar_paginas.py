@@ -17,21 +17,35 @@ marcadores:
 sidecar `<documento>.reparos.json` (lista, um registro por faixa), que o portão `conferir_onda.py` lê.
 O `.report.json` do `mineiro` NUNCA é alterado (procedência).
 
-Recusa (saída 1, nada gravado) quando: o `.md` alvo não tem exatamente uma nota `[fallback]` para a faixa;
-o `.md` alvo já não é o de depois do último reparo (alterado fora do reparo); já há reparo para a faixa
-(idempotência: recusa, não reaplica); a faixa tem mais páginas do que as `paginas_falhas` ainda não
+O registro também guarda `source`, `sha256_original` (do sub-PDF, quando legível no mesmo disco), tokens,
+tempos e custo do relatório do reparo; o portão rederiva do relatório o que dá para rederivar e confere.
+
+Pré-condição: a emenda vem ANTES do portão e do recorte/extração. Recusa se o documento já está em
+`conferidos/<onda>/` ou se já há `trechos-<onda>.jsonl` / `equacoes-<onda>.jsonl` em `--esteira` (default
+`_esteira/incerto`) ou em `<raiz>/_esteira/incerto` — a emenda mudaria tópicos e a ordem das equações já citadas.
+
+Recusa (saída 1, nada gravado) também quando: o nome do documento do reparo não termina em `_pA-B.<ext>`
+(`_pA.<ext>` quando A = B) com a faixa de `--paginas` e a extensão do alvo; o mesmo relatório (sha256) ou o
+mesmo documento de reparo já foi usado em outra faixa; o `.md` alvo não tem exatamente uma nota `[fallback]`
+para a faixa; o `.md` alvo já não é o de depois do último reparo (alterado fora do reparo); já há reparo para a
+faixa (idempotência: recusa, não reaplica); a faixa tem mais páginas do que as `paginas_falhas` ainda não
 reparadas do alvo; o relatório do reparo tem `paginas_falhas` > 0, ou um número de páginas diferente de
 B-A+1 (quando o relatório o informa); o reparo não passa na conferência do `conferir_onda.py` (mesmas
 regras de perda silenciosa, KaTeX, LaTeX inválido); o texto do reparo cita asset que não existe; ou um
 asset prefixado já existe no alvo (colisão).
 
+Escrita e RECUPERAÇÃO: copia os assets, grava sidecar e `.md` em `*.reparo-tmp`, troca o sidecar e, por
+último, o `.md` (`os.replace`). Se o processo cair no meio, o `.md` alvo ou está intacto (com a nota) ou está
+emendado por inteiro. Intacto: apague os `<documento>.assets/reparo-pA-B-*`, os `*.reparo-tmp` e — se a troca
+do sidecar já ocorreu (o portão acusa "md alterado fora do reparo") — o último registro do sidecar (o arquivo
+inteiro, se era o único), e rode de novo. Emendado: nada a fazer.
+
 Uso:
     python3 skills/lavra/scripts/emendar_paginas.py --raiz <corpus> --onda <onda> --documento <nome.pdf> \
-        --onda-reparo <onda> --documento-reparo <nome.pdf> --paginas A-B
+        --onda-reparo <onda> --documento-reparo <nome_pA-B.pdf> --paginas A-B [--esteira _esteira/incerto]
 Saída: 0 emendado; 1 recusado; 2 em erro de uso. Só biblioteca padrão.
 """
 import argparse
-import copy
 import hashlib
 import io
 import json
@@ -62,17 +76,7 @@ def faixa(texto):
     return a, b
 
 
-def rotulo(a, b):
-    """Como o `mineiro` escreve a faixa na nota: `páginas A-B`, ou `página A`."""
-    return "página %d" % a if a == b else "páginas %d-%d" % (a, b)
-
-
-def codigo(a, b):
-    return "%d" % a if a == b else "%d-%d" % (a, b)
-
-
-def prefixo(a, b):
-    return "reparo-p%s-" % codigo(a, b)
+rotulo, codigo, prefixo = co.rotulo_faixa, co.codigo_faixa, co.prefixo_reparo
 
 
 def validar_documento(nome):
@@ -109,21 +113,6 @@ def _assets(pasta, documento):
     return sorted(rels, key=co._bytes)
 
 
-def _reescritor(documento_reparo, documento, mapa):
-    """Função que troca `<documento_reparo>.assets/<rel>` por `<documento>.assets/<prefixo><rel>`;
-    referência a asset fora de `mapa` é Recusa."""
-    padrao = re.compile(re.escape(documento_reparo + ".assets/") + r"([^\s)\"'<>\]]+)")
-
-    def trocar(texto):
-        def um(m):
-            rel = m.group(1)
-            if rel not in mapa:
-                raise Recusa("o reparo cita %s.assets/%s, que não existe na onda de reparo" % (documento_reparo, rel))
-            return documento + ".assets/" + mapa[rel]
-        return padrao.sub(um, texto)
-    return trocar
-
-
 def _numero_de_paginas(rel):
     s = rel["summary"]
     for lugar in (s.get("parse") or {}, s):
@@ -133,8 +122,20 @@ def _numero_de_paginas(rel):
     return None
 
 
-def emendar(raiz, onda, documento, onda_reparo, documento_reparo, a, b):
-    """Aplica a emenda; devolve o registro gravado no sidecar. Toda conferência vem antes de qualquer escrita."""
+def _saida_de_extracao(esteiras, onda):
+    """Os arquivos de recorte ou extração da onda que já existem nas pastas da esteira."""
+    achados = []
+    for pasta in esteiras:
+        for prefixo_ in ("trechos", "equacoes"):
+            c = os.path.join(pasta, "%s-%s.jsonl" % (prefixo_, onda))
+            if os.path.exists(c):
+                achados.append(c.replace(os.sep, "/"))
+    return achados
+
+
+def emendar(raiz, onda, documento, onda_reparo, documento_reparo, a, b, esteiras=()):
+    """Aplica a emenda; devolve o registro gravado no sidecar. Toda conferência vem antes de qualquer escrita.
+    `esteiras`: pastas onde procurar saída de recorte/extração da onda (além de `<raiz>/_esteira/incerto`)."""
     co.validar_nome(onda)
     co.validar_nome(onda_reparo)
     validar_documento(documento)
@@ -149,7 +150,22 @@ def emendar(raiz, onda, documento, onda_reparo, documento_reparo, a, b):
             raise Recusa("arquivo não encontrado: %s" % os.path.relpath(c, raiz).replace(os.sep, "/"))
     n, faixa_txt, pre = b - a + 1, codigo(a, b), prefixo(a, b)
 
-    # sidecar: idempotência e .md intacto desde o último reparo
+    # pré-condição: a emenda vem antes do portão e do recorte/extração (senão as citações já gravadas mudariam)
+    saida = _saida_de_extracao(list(esteiras) + [os.path.join(raiz, "_esteira", "incerto")], onda)
+    if saida:
+        raise Recusa("a onda já tem saída de recorte/extração (%s): a emenda vem antes do portão e da extração"
+                     % ", ".join(saida))
+    if os.path.exists(os.path.join(raiz, "conferidos", onda, documento + co.SUF_MD)):
+        raise Recusa("%s já está em conferidos/%s/: a emenda vem antes do portão (conferidos/ não se reescreve)"
+                     % (documento, onda))
+
+    # o reparo cobre a faixa pelo nome: <qualquer coisa>_pA-B.<ext do alvo> (ou _pA quando A = B)
+    sufixo = "_p%s%s" % (faixa_txt, os.path.splitext(documento)[1])
+    if not documento_reparo.endswith(sufixo) or len(documento_reparo) == len(sufixo):
+        raise Recusa("o documento do reparo tem de terminar em %s (a faixa de --paginas); recebido %s"
+                     % (sufixo, documento_reparo))
+
+    # sidecar: idempotência, reparo não reusado e .md intacto desde o último reparo
     c_side = os.path.join(pasta, documento + co.SUF_REPAROS)
     try:
         reparos = co.ler_reparos(pasta, documento) or []
@@ -157,6 +173,11 @@ def emendar(raiz, onda, documento, onda_reparo, documento_reparo, a, b):
         raise Recusa(str(e))
     if any(r["paginas"] == faixa_txt for r in reparos):
         raise Recusa("já existe reparo para %s em %s (não se reaplica)" % (rotulo(a, b), os.path.basename(c_side)))
+    sha_rel_r = co._sha256(c_rel_r)
+    for r in reparos:
+        if r["sha256_report_reparo"] == sha_rel_r or r["documento_reparo"] == documento_reparo:
+            raise Recusa("este reparo (%s, relatório sha256 %s) já foi usado nas páginas %s"
+                         % (documento_reparo, sha_rel_r, r["paginas"]))
     sha_antes = co._sha256(c_md)
     if reparos and reparos[-1]["sha256_md_depois"] != sha_antes:
         raise Recusa("md alterado fora do reparo: o .md alvo não é o de depois do último reparo")
@@ -164,7 +185,7 @@ def emendar(raiz, onda, documento, onda_reparo, documento_reparo, a, b):
     # a nota no alvo
     md = _ler_texto(c_md)
     linhas = md.splitlines(keepends=True)
-    nota = re.compile(r"^>\s*⚠️\s*\[fallback\] %s não convertida" % re.escape(rotulo(a, b)))
+    nota = co.re_nota_da_faixa(a, b)
     achadas = [i for i, linha in enumerate(linhas) if nota.match(linha)]
     if len(achadas) != 1:
         raise Recusa("o .md alvo tem %d notas [fallback] para %s; a emenda exige exatamente uma"
@@ -196,46 +217,42 @@ def emendar(raiz, onda, documento, onda_reparo, documento_reparo, a, b):
     colisoes = [d for d in mapa.values() if os.path.lexists(os.path.join(destino_assets, *d.split("/")))]
     if colisoes:
         raise Recusa("colisão de asset em %s.assets/: %s" % (documento, ", ".join(colisoes)))
-    trocar = _reescritor(documento_reparo, documento, mapa)
-    md_r = _ler_texto(c_md_r)
-    conteudo = trocar(md_r).strip("\r\n")
-    items = []
-    for item in rel_r["items"]:
-        x = copy.deepcopy(item)
-        x["item_id"] = pre + str(item.get("item_id"))
-        if isinstance(x.get("final"), str):
-            x["final"] = trocar(x["final"])
-        items.append(x)
+    try:
+        derivado = co.derivar_registro(rel_r, documento_reparo, documento, a, b, mapa)
+        conteudo = co.reescritor(documento_reparo, documento, mapa)(_ler_texto(c_md_r)).strip("\r\n")
+    except ValueError as e:
+        raise Recusa(str(e))
 
-    sha_rel_r = co._sha256(c_rel_r)
     i = achadas[0]
     fim_de_linha = linhas[i][len(linhas[i].rstrip("\r\n")):]
-    bloco = "<!-- reparo: %s, onda %s, relatório sha256 %s -->\n\n%s\n\n<!-- fim do reparo: %s -->" % (
-        rotulo(a, b), onda_reparo, sha_rel_r, conteudo, rotulo(a, b))
-    novo = "".join(linhas[:i]) + bloco + fim_de_linha + "".join(linhas[i + 1:])
+    abre, fecha = co.marcadores_do_reparo(a, b, onda_reparo, sha_rel_r)
+    novo = "".join(linhas[:i]) + "%s\n\n%s\n\n%s" % (abre, conteudo, fecha) + fim_de_linha + "".join(linhas[i + 1:])
     resolve = re.compile(r"^parse: %s:" % re.escape(rotulo(a, b)))
-    registro = {
+    registro = dict(derivado)
+    registro.update({
         "paginas": faixa_txt, "pagina_inicial": a, "pagina_final": b,
         "onda_reparo": onda_reparo, "documento_reparo": documento_reparo,
         "sha256_report_reparo": sha_rel_r, "sha256_md_reparo": co._sha256(c_md_r),
+        "sha256_original": co._sha256_original(raiz, derivado["source"]),
         "sha256_md_antes": sha_antes, "sha256_md_depois": hashlib.sha256(novo.encode("utf-8")).hexdigest(),
-        "items": items, "equacoes": rel_r["summary"].get("equacoes"),
         "erros_resolvidos": [str(e) for e in s.get("erros") or [] if resolve.match(str(e))],
         "assets": [{"origem": o, "destino": d, "sha256": co._sha256(os.path.join(origem_assets, *o.split("/")))}
                    for o, d in pares],
-    }
+    })
 
-    # escrita: assets, .md (troca atômica), sidecar
+    # escrita. Ordem: assets; sidecar e .md em temporários; troca do sidecar; troca do .md por último. Uma
+    # queda deixa o .md alvo intacto (tudo menos a última troca) ou a emenda inteira; ver RECUPERAÇÃO no topo.
     for o, d in pares:
         alvo = os.path.join(destino_assets, *d.split("/"))
         os.makedirs(os.path.dirname(alvo), exist_ok=True)
         shutil.copyfile(os.path.join(origem_assets, *o.split("/")), alvo)
-    temporario = c_md + ".reparo-tmp"
-    with io.open(temporario, "w", encoding="utf-8", newline="") as f:
+    tmp_md, tmp_side = c_md + ".reparo-tmp", c_side + ".reparo-tmp"
+    with io.open(tmp_md, "w", encoding="utf-8", newline="") as f:
         f.write(novo)
-    os.replace(temporario, c_md)
-    with io.open(c_side, "w", encoding="utf-8", newline="\n") as f:
+    with io.open(tmp_side, "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(reparos + [registro], sort_keys=True, ensure_ascii=False, indent=2) + "\n")
+    os.replace(tmp_side, c_side)
+    os.replace(tmp_md, c_md)
     return registro
 
 
@@ -252,6 +269,8 @@ def main(argv=None):
     ap.add_argument("--onda-reparo", required=True, help="onda do reparo, ex.: 2026-10-TALEB-1-reparo-DH")
     ap.add_argument("--documento-reparo", required=True, help="sub-PDF reconvertido, ex.: Dynamic_Hedging_p321-340.pdf")
     ap.add_argument("--paginas", required=True, help="faixa do original que o reparo cobre: A-B (ou A)")
+    ap.add_argument("--esteira", default=os.path.join("_esteira", "incerto"),
+                    help="pasta da esteira local (default: _esteira/incerto)")
     args = ap.parse_args(argv)
     try:
         a, b = faixa(args.paginas)
@@ -264,7 +283,7 @@ def main(argv=None):
         return 2
     try:
         r = emendar(os.path.abspath(args.raiz), args.onda, args.documento, args.onda_reparo,
-                    args.documento_reparo, a, b)
+                    args.documento_reparo, a, b, [os.path.abspath(args.esteira)])
     except Recusa as e:
         print("RECUSADO: %s" % e, file=sys.stderr)
         return 1

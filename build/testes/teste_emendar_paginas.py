@@ -134,19 +134,26 @@ class _Corpus(unittest.TestCase):
         _gravar(os.path.join(self.ext, DOC + ".assets", "fig_0.png"), b"\x89PNG alvo")
         self.md_r = os.path.join(self.rep, DOC_R + ".md")
         self.rel_r = os.path.join(self.rep, DOC_R + ".report.json")
-        _gravar(self.md_r, MD_REPARO)
-        _json(self.rel_r, relatorio_reparo())
-        _gravar(os.path.join(self.rep, DOC_R + ".assets", "fig_0.png"), b"\x89PNG reparo 0")
-        _gravar(os.path.join(self.rep, DOC_R + ".assets", "fig_1.png"), b"\x89PNG reparo 1")
+        self.criar_reparo(REPARO, DOC_R)
+        self.esteira = os.path.join(self.raiz, "esteira-local")
+
+    def criar_reparo(self, onda, doc_r, relatorio=None):
+        """Onda de reparo `onda` com o sub-PDF `doc_r`: o `.md`, o relatório e dois assets das fixtures."""
+        pasta = os.path.join(self.raiz, "extraidos", onda)
+        _gravar(os.path.join(pasta, doc_r + ".md"), MD_REPARO.replace(DOC_R, doc_r))
+        rel = json.loads(json.dumps(relatorio or relatorio_reparo(), ensure_ascii=False).replace(DOC_R, doc_r))
+        _json(os.path.join(pasta, doc_r + ".report.json"), rel)
+        _gravar(os.path.join(pasta, doc_r + ".assets", "fig_0.png"), b"\x89PNG reparo 0")
+        _gravar(os.path.join(pasta, doc_r + ".assets", "fig_1.png"), b"\x89PNG reparo 1")
 
     def tearDown(self):
         shutil.rmtree(self.raiz)
 
-    def emendar(self, paginas="321-340", documento_reparo=DOC_R):
+    def emendar(self, paginas="321-340", documento_reparo=DOC_R, onda_reparo=REPARO):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
-            cod = ep.main(["--raiz", self.raiz, "--onda", ONDA, "--documento", DOC, "--onda-reparo", REPARO,
-                           "--documento-reparo", documento_reparo, "--paginas", paginas])
+            cod = ep.main(["--raiz", self.raiz, "--onda", ONDA, "--documento", DOC, "--onda-reparo", onda_reparo,
+                           "--documento-reparo", documento_reparo, "--paginas", paginas, "--esteira", self.esteira])
         return cod, err.getvalue()
 
     def recusa(self, trecho, **kw):
@@ -237,6 +244,23 @@ class TesteEmendaFeliz(_Corpus):
             {"origem": "fig_1.png", "destino": "reparo-p321-340-fig_1.png",
              "sha256": hashlib.sha256(b"\x89PNG reparo 1").hexdigest()}])
 
+    def test_sidecar_com_source_e_sha256_original(self):
+        r = self.sidecar_lido()[0]
+        self.assertEqual(r["source"], "/mnt/corpus/reparo/Dynamic_Hedging_p321-340.pdf")
+        self.assertIsNone(r["sha256_original"])          # o sub-PDF não está no disco desta raiz
+        self.assertEqual((r["tokens"], r["segundos"], r["segundos_parede"], r["custo_estimado_usd"]),
+                         ({"prompt": 10, "output": 5, "total": 15}, 10.0, 20.0, None))
+
+    def test_sha256_original_quando_o_sub_pdf_esta_no_disco(self):
+        os.remove(self.sidecar)
+        _gravar(self.md, MD_ALVO)
+        for a in os.listdir(os.path.join(self.ext, DOC + ".assets")):
+            if a.startswith("reparo-"):
+                os.remove(os.path.join(self.ext, DOC + ".assets", a))
+        _gravar(os.path.join(self.raiz, "reparo", DOC_R), b"%PDF sub")
+        self.assertEqual(self.emendar()[0], 0)
+        self.assertEqual(self.sidecar_lido()[0]["sha256_original"], hashlib.sha256(b"%PDF sub").hexdigest())
+
     def test_sidecar_deterministico(self):
         texto = _ler(self.sidecar)
         self.assertTrue(texto.endswith("\n"))
@@ -257,7 +281,9 @@ class TesteRecusas(_Corpus):
         self.recusa("2 notas [fallback]")
 
     def test_nota_de_outra_faixa_nao_serve(self):
-        self.recusa("0 notas [fallback] para páginas 321-339", paginas="321-339")
+        self.criar_reparo(REPARO, "Dynamic_Hedging_p321-339.pdf")
+        self.recusa("0 notas [fallback] para páginas 321-339", paginas="321-339",
+                    documento_reparo="Dynamic_Hedging_p321-339.pdf")
 
     def test_reparo_com_paginas_falhas(self):
         self.mudar_relatorio(self.rel_r, lambda r: r["summary"]["parse"].update(paginas_falhas=1))
@@ -299,7 +325,23 @@ class TesteRecusas(_Corpus):
             self.assertEqual(cod, 2, p)
 
     def test_documento_de_reparo_inexistente(self):
-        self.recusa("não encontrado", documento_reparo="Outro.pdf")
+        self.recusa("não encontrado", documento_reparo="Dynamic_Hedging_p321-340.docx")
+
+    def test_nome_do_reparo_sem_a_faixa(self):
+        self.criar_reparo(REPARO, "Dynamic_Hedging_reparo.pdf")
+        self.recusa("_p321-340.pdf", documento_reparo="Dynamic_Hedging_reparo.pdf")
+
+    def test_saida_de_extracao_na_esteira(self):
+        _gravar(os.path.join(self.esteira, "trechos-%s.jsonl" % ONDA), "{}\n")
+        self.recusa("trechos-%s.jsonl" % ONDA)
+
+    def test_saida_de_extracao_na_esteira_do_bucket(self):
+        _gravar(os.path.join(self.raiz, "_esteira", "incerto", "equacoes-%s.jsonl" % ONDA), "{}\n")
+        self.recusa("equacoes-%s.jsonl" % ONDA)
+
+    def test_documento_ja_em_conferidos(self):
+        _gravar(os.path.join(self.raiz, "conferidos", ONDA, DOC + ".md"), MD_ALVO)
+        self.recusa("conferidos")
 
 
 class TesteUmaPagina(_Corpus):
@@ -309,7 +351,8 @@ class TesteUmaPagina(_Corpus):
         _gravar(self.md, MD_ALVO.replace(NOTA, nota7))
         self.mudar_relatorio(self.rel, lambda r: r["summary"].update(
             erros=["parse: página 7: o modelo não devolveu blocos para uma página com texto", ERRO_PIC]))
-        cod, err = self.emendar(paginas="7")
+        self.criar_reparo(REPARO, "Dynamic_Hedging_p7.pdf")
+        cod, err = self.emendar(paginas="7", documento_reparo="Dynamic_Hedging_p7.pdf")
         self.assertEqual(cod, 0, err)
         texto = _ler(self.md)
         self.assertIn("<!-- reparo: página 7, onda %s," % REPARO, texto)
@@ -397,12 +440,10 @@ class TestePortao(_Corpus):
 
     def test_sidecar_com_mais_paginas_que_as_falhas_e_inapto(self):
         self.emendar()
-        s = self.sidecar_lido()
-        s[0]["pagina_final"] = 400
-        _gravar(self.sidecar, json.dumps(s, ensure_ascii=False))
+        self.mudar_relatorio(self.rel, lambda r: r["summary"]["parse"].update(paginas_falhas=10))
         d = self.doc()
         self.assertEqual(d["veredito"], "reprovado")
-        self.assertIn("os reparos cobrem 60 página(s) a mais que summary.parse.paginas_falhas", d["motivos"])
+        self.assertIn("os reparos cobrem 10 página(s) a mais que summary.parse.paginas_falhas", d["motivos"])
         self.assertEqual(co.resumir([d])["por_rota"]["parse"]["fallbacks"], 0)
 
     def test_aprovar_copia_sidecar_e_assets_emendados(self):
@@ -415,6 +456,137 @@ class TestePortao(_Corpus):
                          ["fig_0.png", "reparo-p321-340-fig_0.png", "reparo-p321-340-fig_1.png"])
         self.assertEqual(co.documentos(conf), [DOC])
         self.assertEqual(_sha(os.path.join(conf, DOC + ".report.json")), _sha(self.rel))
+
+
+class TesteFalsificacoes(_Corpus):
+    """O sidecar não se abona sozinho: o portão confere cada registro contra o relatório do reparo (quando
+    está no disco), os marcadores e a nota no `.md`, e os assets emendados (achados da revisão de f862dcd)."""
+
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.emendar()[0], 0)
+
+    def gravar_sidecar(self, fn):
+        s = self.sidecar_lido()
+        fn(s[0])
+        _gravar(self.sidecar, json.dumps(s, ensure_ascii=False))
+
+    def inapto(self, trecho, pasta=None):
+        d = co.ler_onda(pasta or self.ext)[0]
+        self.assertEqual(d["veredito"], "reprovado")
+        self.assertTrue(any(trecho in m for m in d["motivos"]), d["motivos"])
+        return d
+
+    def test_item_trocado_no_sidecar(self):
+        def esconder(r):
+            r["items"][3].update(approved=True, fallback=False)
+        self.gravar_sidecar(esconder)
+        self.inapto("items do sidecar não são os do relatório do reparo")
+
+    def test_items_vazios_com_hash_falso(self):
+        def esvaziar(r):
+            r["items"], r["sha256_report_reparo"] = [], "0" * 64
+        self.gravar_sidecar(esvaziar)
+        self.inapto("sha256 do relatório do reparo")
+
+    def test_md_original_com_depois_recalculado(self):
+        _gravar(self.md, MD_ALVO)
+        self.gravar_sidecar(lambda r: r.update(sha256_md_depois=_sha(self.md)))
+        self.inapto("nota [fallback] de páginas 321-340 continua no .md")
+        self.inapto("marcadores")
+
+    def test_marcador_com_hash_de_outro_relatorio(self):
+        _gravar(self.md, _ler(self.md).replace(_sha(self.rel_r), "1" * 64))
+        self.gravar_sidecar(lambda r: r.update(sha256_md_depois=_sha(self.md)))
+        self.inapto("marcadores")
+
+    def test_asset_trocado_depois_da_emenda(self):
+        _gravar(os.path.join(self.ext, DOC + ".assets", "reparo-p321-340-fig_0.png"), b"outra imagem")
+        self.inapto("reparo-p321-340-fig_0.png")
+
+    def test_relatorio_do_reparo_trocado_no_disco(self):
+        self.mudar_relatorio(self.rel_r, lambda r: r["summary"].update(segundos=99.0))
+        self.inapto("sha256 do relatório do reparo")
+
+    def test_em_conferidos_sem_a_onda_de_reparo(self):
+        co.aprovar(self.raiz, ONDA, co.ler_onda(self.ext), {})
+        shutil.rmtree(self.rep)
+        conf = os.path.join(self.raiz, "conferidos", ONDA)
+        docs = co.ler_onda(conf)
+        self.assertEqual(docs[0]["veredito"], "apto", docs[0]["motivos"])
+        md = co.relatorio_md(ONDA, docs, co.resumir(docs))
+        self.assertIn("não encontrado em extraidos/%s/: conferência com o relatório pulada" % REPARO, md)
+        _gravar(os.path.join(conf, DOC + ".assets", "reparo-p321-340-fig_1.png"), b"outra")
+        self.inapto("reparo-p321-340-fig_1.png", conf)
+
+    def test_relatorio_conferido_aparece_no_portao(self):
+        docs = co.ler_onda(self.ext)
+        self.assertIn("| conferido |", co.relatorio_md(ONDA, docs, co.resumir(docs)))
+
+
+NOTA_100 = NOTA.replace("321-340", "100-104")
+ERRO_100 = ERRO_429.replace("321-340", "100-104")
+
+
+class TesteDuasFaixas(_Corpus):
+    """Alvo com duas faixas perdidas: o reparo de uma não serve para a outra (achado da revisão)."""
+
+    def setUp(self):
+        super().setUp()
+        _gravar(self.md, MD_ALVO.replace("A particularity of American double bets.",
+                                         "A particularity of American double bets.\n\n" + NOTA_100))
+        self.mudar_relatorio(self.rel, lambda r: (r["summary"]["parse"].update(paginas_falhas=25),
+                                                  r["summary"].update(erros=[ERRO_100, ERRO_429, ERRO_PIC])))
+
+    def test_reparo_de_321_340_reusado_com_paginas_100_104_recusa(self):
+        self.recusa("_p100-104.pdf", paginas="100-104")
+
+    def test_relatorio_ja_usado_em_outra_faixa_recusa(self):
+        self.assertEqual(self.emendar()[0], 0)
+        outro = os.path.join(self.raiz, "extraidos", "reparo-2")
+        doc = "Dynamic_Hedging_p100-104.pdf"
+        for suf in (".md", ".report.json"):
+            _gravar(os.path.join(outro, doc + suf), _ler(os.path.join(self.rep, DOC_R + suf)))
+        self.recusa("já foi usado nas páginas 321-340", paginas="100-104", documento_reparo=doc, onda_reparo="reparo-2")
+
+    def test_so_uma_faixa_reparada_a_outra_perda_continua(self):
+        self.assertEqual(self.emendar()[0], 0)
+        texto = _ler(self.md)
+        self.assertIn(NOTA_100, texto)
+        self.assertNotIn(NOTA, texto)
+        d = co.ler_onda(self.ext)[0]
+        self.assertEqual(d["veredito"], "apto", d["motivos"])
+        parse = [p for p in d["perdas"] if p["rota"] == "parse"]
+        self.assertEqual([(p["item"], p["motivo"]) for p in parse], [("5 página(s)", ERRO_100)])
+        self.assertEqual(co.resumir([d])["por_rota"]["parse"]["fallbacks"], 5)
+
+
+class TesteCustoEValidador(_Corpus):
+    def portao(self):
+        docs = co.ler_onda(self.ext)
+        return docs, co.relatorio_md(ONDA, docs, co.resumir(docs))
+
+    def test_reparos_com_tokens_e_tempo_e_custo_total(self):
+        self.mudar_relatorio(self.rel, lambda r: r["summary"].update(custo_estimado_usd=0.5))
+        self.mudar_relatorio(self.rel_r, lambda r: r["summary"].update(custo_estimado_usd=0.25))
+        self.assertEqual(self.emendar()[0], 0)
+        docs, md = self.portao()
+        self.assertIn("| custo | US$ 0.5000 |", md)                       # números da onda alvo intactos
+        self.assertIn("| custo total incluindo reparos | US$ 0.7500 |", md)
+        self.assertIn("| tokens | output 5 · prompt 10 · total 15 |", md)
+        linha = [l for l in md.splitlines() if l.startswith("| %s | 321-340 |" % DOC)][0]
+        self.assertIn("output 5 · prompt 10 · total 15", linha)
+        self.assertIn("0,01 h (20,0 s)", linha)
+
+    def test_sem_reparo_sem_linha_de_custo_total(self):
+        self.assertNotIn("custo total incluindo reparos", self.portao()[1])
+
+    def test_validador_do_reparo_quando_o_alvo_nao_tem_equacao(self):
+        self.mudar_relatorio(self.rel, lambda r: r["summary"].update(equacoes=_eq()))
+        self.assertEqual(self.emendar()[0], 0)
+        docs, md = self.portao()
+        self.assertEqual(docs[0]["validador"], "katex")
+        self.assertIn("| %s | 8 | 1 | katex |" % DOC, md)
 
 
 class TesteRecorteEExtracao(_Corpus):

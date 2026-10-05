@@ -165,13 +165,23 @@ O `mineiro` reconverte só documentos inteiros. Quando uma faixa de páginas se 
 os assets vão para `<nome>.assets/` com o prefixo `reparo-pA-B-` (referências reescritas; colisão recusa); o
 registro (faixa, onda e documento do reparo, sha256 do relatório e do `.md` do reparo, sha256 do `.md` alvo
 antes e depois, os `items` com ids prefixados, `summary.equacoes` e as mensagens de `erros` resolvidas) vai
-para o sidecar `<nome>.reparos.json`. O `.report.json` do `mineiro` nunca muda (procedência). A emenda recusa,
-sem gravar nada, se não houver exatamente uma nota para a faixa, se o reparo tiver `paginas_falhas` > 0 ou
-outro número de páginas (quando o relatório o informa), se o reparo não passar nas regras deste contrato, ou
-se a faixa já tiver sido reparada (não se reaplica). O portão lê o sidecar: o `.md` tem de ser o de depois do
-último reparo (senão, "md alterado fora do reparo", inapto); as páginas reparadas saem de `paginas_falhas`
-e a mensagem resolvida sai das perdas; itens e equações do reparo entram nas regras de perda silenciosa e
-nas contagens; o relatório ganha a seção "Reparos"; o `--aprovar` copia o sidecar e os assets emendados.
+para o sidecar `<nome>.reparos.json`, com `source`, `sha256_original`, tokens, tempos e custo do reparo. O
+`.report.json` do `mineiro` nunca muda (procedência). A emenda vem **antes** do portão e da extração: recusa
+se o documento já está em `conferidos/` ou se a onda já tem `trechos-`/`equacoes-<onda>.jsonl` na esteira.
+Recusa também, sem gravar nada, se o nome do reparo não terminar em `_pA-B.<ext>` com a faixa de `--paginas`,
+se o mesmo relatório ou documento de reparo já tiver sido usado em outra faixa, se não houver exatamente uma
+nota para a faixa, se o reparo tiver `paginas_falhas` > 0 ou outro número de páginas (quando o relatório o
+informa), se o reparo não passar nas regras deste contrato, ou se a faixa já tiver sido reparada (não se
+reaplica). O portão lê o sidecar e **não o aceita sozinho**: por registro, exige um só par de marcadores com
+a onda e o sha256 do registro, nenhuma nota `[fallback]` da faixa restante e cada asset emendado com o sha256
+registrado (também em `conferidos/`); quando o relatório do reparo está em `extraidos/<onda-reparo>/`, exige
+o mesmo sha256 e rederiva dele os items prefixados, `equacoes`, `source`, tokens e tempos (e confere o trecho
+emendado contra o `.md` do reparo) — sem ele, a seção "Reparos" diz "conferência com o relatório pulada". O
+`.md` tem de ser o de depois do último reparo (senão, "md alterado fora do reparo", inapto); as páginas
+reparadas saem de `paginas_falhas` e a mensagem resolvida sai das perdas; itens e equações do reparo entram nas regras de perda silenciosa e
+nas contagens; o relatório ganha a seção "Reparos" (com tokens e tempo de cada reparo) e a linha "custo total
+incluindo reparos" (os números da onda não mudam); o validador de um alvo sem equação é o do reparo; o
+`--aprovar` copia o sidecar e os assets emendados.
 Os marcadores são comentários HTML: não viram tópico no recorte nem equação na extração, e as equações do
 reparo entram na ordem do `.md` emendado (`<documento>#<ordem>`). Perda de sumário (ex.: SCFT pp. 7–14) não
 se emenda: continua perda declarada.
