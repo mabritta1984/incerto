@@ -43,10 +43,10 @@ fonte: [externo] — Statistical Consequences of Fat Tails (2020)
 
 ### Mediocristão não é atestado de segurança
 
-enunciado: κ ≤ 0,3 e α̂ ≥ 2 autorizam média e variância como descrição da amostra observada, mas não provam ausência de cauda: a janela pode não ter visto o evento extremo.
+enunciado: κ ≤ 0,3 e α̂ ≥ 2 não declaram Extremistão pelos limiares do Incerto, mas não fazem da variância uma medida de risco: com 2 ≤ α̂ < 4 a variância existe, porém o quarto momento é infinito e a estimativa dela é instável (retornos de ações, com α perto de 3, são o exemplo de Taleb de por que desvio-padrão e Sharpe enganam); e a janela pode não ter visto o evento extremo.
 condicao: `kappa <= 0.3 and alpha >= 2`
 sustenta: problema do peru, caudas gordas
-fonte: [externo] — The Black Swan (2007), cap. 4; Fooled by Randomness (2001)
+fonte: [externo] — Statistical Consequences of Fat Tails (2020); The Black Swan (2007), cap. 4
 
 ### exposição côncava primeiro
 
@@ -71,7 +71,7 @@ fonte: [externo] — Antifragile (2012), livro V
 
 ### perda máxima delimitada por construção
 
-enunciado: num barbell com fracao_segura ≥ 0,85 e o lado convexo de perda limitada ao aplicado, a perda máxima da carteira é no máximo 15%, sem depender de previsão — é a perda que a estação descreve, não um tamanho de posição.
+enunciado: num barbell com fracao_segura ≥ 0,85 (limiar autoral do Incerto, na faixa de 85–90% que Taleb cita), com lado seguro de perda nula, como em convexidade.barbell, e o lado convexo de perda limitada ao aplicado, a perda máxima da carteira é no máximo 15%, sem depender de previsão — é a perda que a estação descreve, não um tamanho de posição.
 condicao: `fracao_segura >= 0.85`
 sustenta: barbell, via negativa, ergodicidade
-fonte: [externo] — Antifragile (2012); The Black Swan (2007), cap. 13
+fonte: [externo] — Antifragile (2012); The Black Swan (2007), cap. 13 (faixa de 85–90%; o corte em 0,85 e o lado seguro de perda nula são do modelo do Incerto)

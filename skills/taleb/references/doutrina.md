@@ -53,14 +53,15 @@ fonte: [externo] — Antifragile (2012), livro V e apêndices técnicos
 
 ### barbell
 
-Estratégia de dois extremos e nada no meio: a maior parte da exposição em algo de perda máxima
-conhecida e pequena (o lado seguro) e uma fração menor em apostas convexas, de perda limitada ao que foi
+Estratégia de dois extremos e nada no meio: a maior parte da exposição em algo quase sem risco
+(o lado seguro, de perda desprezível) e uma fração menor em apostas convexas, de perda limitada ao que foi
 aplicado e ganho potencialmente grande. O meio-termo "de risco moderado" é evitado porque costuma
 esconder perda de cauda que não aparece na volatilidade medida. A virtude da construção é que a perda
 máxima da carteira fica delimitada por construção, não por estimativa.
 
 No diagnóstico: `convexidade.barbell(fracao_segura, perda_maxima_convexa)` devolve a perda máxima da
-carteira, (1 − fracao_segura) · perda_maxima_convexa. A estação descreve essa perda máxima; não
+carteira, (1 − fracao_segura) · perda_maxima_convexa: o modelo do Incerto trata a perda do lado seguro
+como nula, simplificação do "quase sem risco" de Taleb. A estação descreve essa perda máxima; não
 dimensiona posição de ninguém.
 
 fonte: [externo] — Antifragile (2012); The Black Swan (2007), cap. 13

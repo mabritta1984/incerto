@@ -30,6 +30,8 @@ RE_PROIBIDA = re.compile(r"\b(compre|venda|recomendo|recomendamos)\b", re.I)
 # Infinitivo: só dentro de uma frase de proibição explícita (`nunca`/`jamais` antes da palavra, na mesma frase).
 RE_INFINITIVO = re.compile(r"\b(comprar|vender)\b", re.I)
 RE_PROIBICAO = re.compile(r"\b(nunca|jamais)\b", re.I)
+# "autoriza…" a até 80 caracteres de "variância" (em qualquer ordem): licença de variância como medida de risco.
+RE_AUTORIZA_VARIANCIA = re.compile(r"autoriz\w*.{0,80}?variância|variância.{0,80}?autoriz\w*", re.I | re.S)
 
 
 def ler(rel):
@@ -112,6 +114,21 @@ class TesteSkillTaleb(unittest.TestCase):
         # O limiar do Extremistão é o mesmo do relatorio.py.
         conds = [campo(c, "condicao") for _, c in vs]
         self.assertIn(f"kappa > {R.LIMIAR_KAPPA} or alpha < {R.LIMIAR_ALFA:g}", conds)
+
+    def test_heuristicas_nao_autorizam_variancia(self):
+        # Com 2 <= alpha < 4 a variância existe mas sua estimativa é instável: nenhuma heurística a licencia.
+        texto = ler(HEURISTICAS)
+        self.assertIsNone(RE_AUTORIZA_VARIANCIA.search(texto), RE_AUTORIZA_VARIANCIA.search(texto))
+        vs = dict(verbetes(texto))
+        mediocristao = campo(vs["Mediocristão não é atestado de segurança"], "enunciado")
+        self.assertIn("instável", mediocristao)
+        self.assertIn("2 ≤ α̂ < 4", mediocristao)
+
+    def test_barbell_declara_limiar_autoral_e_lado_seguro_nulo(self):
+        barbell = campo(dict(verbetes(ler(HEURISTICAS)))["perda máxima delimitada por construção"], "enunciado")
+        self.assertIn("limiar autoral do Incerto", barbell)
+        self.assertIn("perda nula", barbell)
+        self.assertIn("nula", dict(verbetes(ler(DOUTRINA)))["barbell"])
 
     def test_skill_nunca_recomenda(self):
         for rel in (SKILL, DOUTRINA, HEURISTICAS):
