@@ -11,7 +11,7 @@ vale o `grafo-incerto.md` e esta reference é corrigida.
 
 - **Um bloco por rodada.** Tudo o que a rodada pede ao PO vai junto, depois do fiscal com as duas vias
   (passo 6). Nada é perguntado aos pedaços nem decidido em silêncio no meio do caminho.
-- **Ordem fixa**, as sete seções abaixo, nessa ordem; seção sem item aparece com "nada nesta rodada".
+- **Ordem fixa**, as oito seções abaixo, nessa ordem; seção sem item aparece com "nada nesta rodada".
 - **Item autossuficiente.** Cada item traz o que o PO precisa para decidir sem abrir arquivo: a equação
   (nome, LaTeX de origem, `(documento, tópico)`), a linha do fiscal quando houver, e a saída Wolfram verbatim
   quando ela é o motivo do item.
@@ -23,7 +23,24 @@ vale o `grafo-incerto.md` e esta reference é corrigida.
 
 ## As seções, na ordem
 
-### 1. Renomeações (`renomear_variavel`)
+### 1. Funções (`declarar_funcoes`)
+
+Vem primeiro porque muda o que parseia: Taleb escreve funções como `f(x)`, `F(x, \lambda)`, `\gamma(x)`, e a
+regra estrita faz de toda letra solta seguida de `(` uma perda (`nao_suportado:<f>(`), porque `p(1-p)` pode
+ser produto. O PO declara, **por documento**, que símbolos são funções; só esses viram aplicação de função, e
+todo o resto segue a regra estrita. O item mostra o documento, os símbolos propostos (nomes canônicos do
+parser: `gamma` para `\gamma`, `f_1`, `I_x`, `n_F`) e as perdas `nao_suportado:<f>(` desse documento que a
+declaração resolve. Nome declarado que o documento também usa como variável (o `f` de Kelly) vira perda
+`nao_suportado:uso_misto:<f>` nas equações onde aparece dos dois jeitos — o item avisa. Uma linha por
+documento; `funcoes` lista não vazia, sem repetição. Diferente das outras decisões, esta muda os candidatos:
+depois da resposta, o rito volta à extração (passo 4, `extrair_equacoes.py --decisoes …`), depois aos
+momentos (passo 5) e ao fiscal (passo 6).
+
+```jsonl
+{"documento": "<documento>.pdf.md", "funcoes": ["f", "F", "gamma", "H"], "tipo": "declarar_funcoes"}
+```
+
+### 2. Renomeações (`renomear_variavel`)
 
 Símbolo que deve virar variável com nome semântico (o `alpha` do índice de cauda, o `L` do mínimo da
 Pareto). O item mostra a equação, o símbolo e o nome proposto; duas equações que dão o mesmo nome a uma
@@ -33,7 +50,7 @@ variável passam a usar o mesmo `:Variavel`.
 {"equacao": "<documento>.pdf.md#<ordem>", "nome": "indice_de_cauda", "simbolo": "alpha", "tipo": "renomear_variavel"}
 ```
 
-### 2. Rótulos (`rotular_equacao`)
+### 3. Rótulos (`rotular_equacao`)
 
 Rótulo estável que a estação `taleb` usa para achar a equação — os `EQ_*` do `relatorio.py` (`kappa`,
 `hill`, `razao_max_soma`, `assimetria_convexidade`, `crescimento_temporal`, `crescimento_ensemble`) e o
@@ -45,7 +62,7 @@ na rodada ou já usado por outra `:Equacao` do corpus recusa a aprovação antes
 {"equacao": "<documento>.pdf.md#<ordem>", "rotulo": "kappa", "tipo": "rotular_equacao"}
 ```
 
-### 3. Conceitos (`conceito`)
+### 4. Conceitos (`conceito`)
 
 Conceito que o trecho define e que entra como `:Conceito` aprovado. O item mostra o nome, o
 `tipo_conceito` proposto (`fenomeno`, `principio`, `falacia` ou `regime`), a definição tirada do trecho, os
@@ -55,7 +72,7 @@ sinônimos e a fonte `{documento, topico}` dos `conferidos/`.
 {"definicao": "<definição tirada do trecho>", "fonte": {"documento": "<documento>.pdf.md", "topico": "<tópico>"}, "nome": "extremistao", "sinonimos": ["Extremistão"], "tipo": "conceito", "tipo_conceito": "regime"}
 ```
 
-### 4. Heurísticas (`heuristica`)
+### 5. Heurísticas (`heuristica`)
 
 Regra prática com `condicao` relacional sobre símbolos (a mesma gramática das `validades-`), fonte e os
 nomes que ela sustenta — conceito decidido nesta rodada ou equação da onda (`SUSTENTA` herda o status do
@@ -65,7 +82,7 @@ alvo).
 {"condicao": "alpha < 2", "enunciado": "<enunciado tirado do trecho>", "fonte": {"documento": "<documento>.pdf.md", "topico": "<tópico>"}, "nome": "variancia_infinita", "sustenta": ["extremistao"], "tipo": "heuristica"}
 ```
 
-### 5. Momentos (`momento_fechado`)
+### 6. Momentos (`momento_fechado`)
 
 Momento fechado que a fonte declara para a equação (`{"media": "...", "variancia": "..."}`, sintaxe SymPy).
 Diferente das outras decisões, este muda o candidato: depois da resposta, o rito volta ao passo 5
@@ -75,7 +92,7 @@ Diferente das outras decisões, este muda o candidato: depois da resposta, o rit
 {"equacao": "<documento>.pdf.md#<ordem>", "momento_fechado": {"media": "alpha*L/(alpha - 1)"}, "tipo": "momento_fechado"}
 ```
 
-### 6. Indeterminados a aceitar (`aceitar_indeterminado`)
+### 7. Indeterminados a aceitar (`aceitar_indeterminado`)
 
 Cada linha `indeterminado` do `fiscal-<onda>.jsonl` que o PO pode aceitar (filha que escolhe um ramo,
 `Solve` sem resposta, condição que o SymPy não decide). O aceite casa **exatamente** uma linha: `prova` mais
@@ -92,7 +109,7 @@ P4, a saída Wolfram verbatim.
 {"equacao": "<documento>.pdf.md#<momento>", "prova": "P4", "tipo": "aceitar_indeterminado"}
 ```
 
-### 7. Vermelhos (só nota)
+### 8. Vermelhos (só nota)
 
 Toda linha `vermelho` do fiscal, com o `detalhe` e, quando a P4 é o motivo, as duas saídas lado a lado
 (SymPy e Wolfram verbatim). **Vermelho nunca promove**, com ou sem decisão: não há linha JSONL para ele e o
@@ -104,6 +121,10 @@ próxima rodada. "Sem prova Wolfram" (Wolfram indisponível) também é vermelho
 ## Depois da resposta
 
 1. Anexe as linhas a `_esteira/incerto/decisoes-<onda>.jsonl`.
-2. Se entrou `momento_fechado` novo, ou se a nota de algum vermelho mudou derivação, validade ou candidato:
+2. Se entrou `declarar_funcoes` nova ou mudada: volte ao passo 4 do rito só na extração (o candidato
+   reextraído difere do gravado, e a extração não sobrescreve: tire o `equacoes-<onda>.jsonl` antigo do
+   caminho antes), reaplique os momentos (passo 5) e refaça o fiscal (passo 6) — a prova Wolfram da equação
+   cujo `srepr` mudou fica desatualizada e é refeita.
+3. Se entrou `momento_fechado` novo, ou se a nota de algum vermelho mudou derivação, validade ou candidato:
    volte ao passo 5 do rito (o fiscal ficou desatualizado e `aprovar_onda.py` recusaria).
-3. Senão, siga ao passo 8: ensaio, plano ao PO, `--executar` só com a decisão dele.
+4. Senão, siga ao passo 8: ensaio, plano ao PO, `--executar` só com a decisão dele.

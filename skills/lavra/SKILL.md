@@ -104,14 +104,25 @@ tópico citado tem de ser o de um trecho, e ela recusa nível diferente do manif
 python3 skills/lavra/scripts/extrair_equacoes.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/equacoes-<onda>.jsonl
 ```
 
+A extração lê as funções que o PO declarou por documento (`declarar_funcoes` em
+`_esteira/incerto/decisoes-<onda>.jsonl`, ao lado da `--saida`; outro arquivo com `--decisoes <arquivo>`): só
+esses símbolos viram aplicação de função; na primeira passada ainda não há declaração e `f(x)` é perda
+`nao_suportado:f(`. Quando o PO declara funções no passo 7, volte aqui: tire o `equacoes-<onda>.jsonl` antigo
+do caminho (a extração não sobrescreve conteúdo diferente) e reextraia, depois siga aos passos 5 e 6:
+
+```
+mv _esteira/incerto/equacoes-<onda>.jsonl _esteira/incerto/equacoes-<onda>.antes-das-funcoes.jsonl
+python3 skills/lavra/scripts/extrair_equacoes.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/equacoes-<onda>.jsonl --decisoes _esteira/incerto/decisoes-<onda>.jsonl
+```
+
 Registre em `docs/oficina/onda-<onda>.md` o que o PO precisa ver da onda: tempos, tokens, custo (ou "não
 informado"), trechos, equações parseáveis sobre o total e cada perda declarada com o motivo.
 
 **Pare se** o recorte abortar (tópico acima de `--teto-chars`) ou recusar a saída já existente, se a ingestão
 sair com 1 (linha recusada) ou o `--verificar` sair com 1 (duplicata, embedding fora da dimensão, índice
 `trecho_*_incerto` ausente ou com o nome tomado por outro índice do banco compartilhado), ou se a extração
-recusar sobrescrever `equacoes-<onda>.jsonl` com conteúdo diferente ou um `--nivel` diferente do
-recorte.
+recusar sobrescrever `equacoes-<onda>.jsonl` com conteúdo diferente, um `--nivel` diferente do
+recorte ou uma `declarar_funcoes` malformada, repetida ou de documento fora da onda.
 
 ### 5. Aplicar os momentos
 
@@ -163,7 +174,7 @@ registrada, o item fica P4 vermelho "sem prova Wolfram" e vai ao bloco do passo 
 
 ### 7. Bloco de decisão único
 
-Um bloco por rodada ao PO, no formato de `references/devolucao.md`: renomeações, rótulos, conceitos,
+Um bloco por rodada ao PO, no formato de `references/devolucao.md`: funções, renomeações, rótulos, conceitos,
 heurísticas, momentos, indeterminados a aceitar (cada um com as chaves estruturadas exatas da sua linha de
 `_esteira/incerto/fiscal-<onda>.jsonl`) e vermelhos (só nota; vermelho nunca promove). As respostas do PO
 viram linhas de `_esteira/incerto/decisoes-<onda>.jsonl`, transcritas sem interpretação; confira a
@@ -173,8 +184,10 @@ transcrição com o ensaio do passo 8:
 python3 skills/lavra/scripts/aprovar_onda.py --onda <onda>
 ```
 
-**Pare se** o PO não respondeu ao bloco inteiro. Se a resposta trouxe momento novo ou mudou derivação,
-validade ou candidato, volte ao passo 5: o fiscal ficou desatualizado.
+**Pare se** o PO não respondeu ao bloco inteiro. Se a resposta trouxe `declarar_funcoes` nova ou mudada,
+volte ao passo 4 só para reextrair com `extrair_equacoes.py --decisoes`, depois aos momentos (passo 5) e ao
+fiscal (passo 6): a função declarada muda o que parseia. Se trouxe momento novo ou mudou derivação, validade
+ou candidato, volte ao passo 5: o fiscal ficou desatualizado.
 
 ### 8. Aprovar
 
@@ -202,8 +215,8 @@ rodada). Nada foi gravado em nenhum desses casos.
   `rerender` do `mineiro`.
 - Não grava no grafo por fora de `ingerir_trechos.py` e `aprovar_onda.py`; não promove nada que o gate não
   promoveu. Vermelho nunca promove, com ou sem decisão.
-- Não decide pelo PO: momento, conceito, heurística, renomeação e aceite de indeterminado são dele, um a um,
-  no bloco único da rodada.
+- Não decide pelo PO: função declarada, momento, conceito, heurística, renomeação e aceite de indeterminado
+  são dele, um a um, no bloco único da rodada.
 - Não roda nem simula passo de gasto ou de escrita sem a decisão do PO.
 
 ## Referências

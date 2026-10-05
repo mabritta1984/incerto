@@ -117,12 +117,18 @@ a menos, valor vazio ou repetição recusam a execução inteira**.
 
 | `tipo` | Campos | Efeito |
 |---|---|---|
+| `declarar_funcoes` | `documento` (o `fonte.documento` de algum candidato da onda), `funcoes` (lista não vazia de nomes únicos na sintaxe dos símbolos do parser: `f`, `F`, `gamma`, `f_1`, `I_x`, `n_F`) | não grava no grafo: é lida pela extração (`extrair_equacoes.py --decisoes`), **antes dos momentos e do fiscal** — só os símbolos declarados viram aplicação de função naquele documento (o resto segue a regra estrita: `p(1-p)` é perda); nome declarado usado também como símbolo na mesma equação é perda `nao_suportado:uso_misto:<f>`. Cada candidato registra `funcoes_declaradas`; o plano lista o declarado por documento. Uma por documento; documento sem candidato na onda recusa |
 | `renomear_variavel` | `equacao`, `simbolo`, `nome` | a variável daquele símbolo naquela equação passa a ser `:Variavel {nome}` |
 | `conceito` | `nome`, `tipo_conceito` (`fenomeno`\|`principio`\|`falacia`\|`regime`), `definicao`, `sinonimos` (lista), `fonte` | `:Conceito` aprovado (`tipo` = `tipo_conceito`: o `tipo` da linha é o da decisão) |
 | `heuristica` | `nome`, `enunciado`, `condicao`, `fonte`, `sustenta` (nomes de conceito decidido ou equação da onda) | `:Heuristica` aprovada e um `SUSTENTA` por nome, com o status do alvo |
 | `aceitar_indeterminado` | `prova` + **exatamente** as chaves estruturadas da linha: P1 `equacao`; P2 `mae`, `filha`, `simbolo`, `substituicao`; P3 `equacao`, `condicao`; P4 `mae`, `filha` ou `equacao` | aquela linha `indeterminado` passa a passar; nada mais (sem curinga) |
 | `momento_fechado` | `equacao`, `momento_fechado` (`{"media": "...", ...}`) | aplicado ao candidato por `--aplicar-momentos`, **antes do fiscal** |
 | `rotular_equacao` | `equacao` (`<documento>#<ordem>`, candidato da onda), `rotulo` (`^[a-z][a-z0-9_]*$`) | grava `:Equacao.rotulo` — o nome estável com que o `relatorio.py` (`EQ_*`) e o MCP `ler_equacao` acham a equação. Uma equação, um rótulo; rótulo repetido no plano recusa na validação, e rótulo já em outra `:Equacao` do corpus (fora do plano) recusa antes de qualquer escrita |
+
+Rito das funções declaradas: decisão em `decisoes-` → tirar o `equacoes-<onda>.jsonl` antigo do caminho (a
+extração não sobrescreve conteúdo diferente) → `extrair_equacoes.py --decisoes _esteira/incerto/decisoes-<onda>.jsonl`
+→ `--aplicar-momentos` → `fiscal.py` (a prova Wolfram de equação cujo `srepr` mudou fica desatualizada:
+refazê-la) → `aprovar_onda.py`.
 
 Rito do momento fechado: decisão em `decisoes-` → `aprovar_onda.py --onda <onda> --aplicar-momentos`
 (regrava `equacoes-<onda>.jsonl`, chaves ordenadas, `\n`) → `fiscal.py` → prova Wolfram do momento

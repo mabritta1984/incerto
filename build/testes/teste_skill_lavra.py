@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Task 19 (passo 1): estação `lavra` — SKILL.md (frontmatter, bloco `regras-do-incerto` injetado, o rito por
 onda em oito passos na ordem, cada um com comando e condição de parada, e só scripts e flags que existem) e
-`references/devolucao.md` (o bloco de decisão único da rodada: os seis tipos de decisão na ordem, cada
+`references/devolucao.md` (o bloco de decisão único da rodada: os sete tipos de decisão na ordem, cada
 linha JSONL aceita pelo validador de `aprovar_onda.py`, e vermelho que nunca promove). Nada aqui toca rede."""
 import json
 import os
@@ -27,8 +27,9 @@ PASSOS = ("Copiar os originais", "Disparar a conversão", "Portão", "Recortar, 
 CUSTOSOS = (1, 2, 4, 8)
 RITO_SCRIPTS = ("conferir_onda.py", "recortar_trechos.py", "ingerir_trechos.py", "extrair_equacoes.py",
                 "aprovar_onda.py", "fiscal.py", "registrar_prova.py")
-# Ordem do bloco de decisão: renomeações, rótulos, conceitos, heurísticas, momentos, indeterminados, vermelhos.
-DECISOES = ("renomear_variavel", "rotular_equacao", "conceito", "heuristica", "momento_fechado",
+# Ordem do bloco de decisão: funções (decididas primeiro: mudam o que parseia), renomeações, rótulos, conceitos,
+# heurísticas, momentos, indeterminados, vermelhos.
+DECISOES = ("declarar_funcoes", "renomear_variavel", "rotular_equacao", "conceito", "heuristica", "momento_fechado",
             "aceitar_indeterminado")
 RE_BLOCO = re.compile(r"<!-- bloco:regras-do-incerto:inicio \((?P<papel>dono|gerado)[^>]*-->\n(?P<miolo>.*?)"
                       r"<!-- bloco:regras-do-incerto:fim -->", re.S)
@@ -98,6 +99,13 @@ class TesteSkillLavra(unittest.TestCase):
             self.assertTrue(comandos(corpo), f"passo {n} ({titulo}) sem comando")
             self.assertIn("**Pare", corpo, f"passo {n} ({titulo}) sem condição de parada")
 
+    def test_declarar_funcoes_volta_a_extracao(self):
+        # a decisão muda o que parseia: o rito volta à extração (com --decisoes), depois momentos, depois fiscal
+        ps = {n: corpo for n, _, corpo in passos(ler(SKILL))}
+        self.assertIn("--decisoes", ps[4])
+        self.assertIn("declarar_funcoes", ps[7])
+        self.assertIn("extrair_equacoes.py", ps[7])
+
     def test_passos_custosos_exigem_decisao_do_po(self):
         ps = {n: corpo for n, _, corpo in passos(ler(SKILL))}
         for n in CUSTOSOS:
@@ -139,10 +147,10 @@ class TesteSkillLavra(unittest.TestCase):
     def test_devolucao_lista_os_tipos_na_ordem(self):
         texto = ler(DEVOLUCAO)
         titulos = re.findall(r"^### (.*)$", texto, re.M)
-        self.assertEqual(len(titulos), 7, titulos)
+        self.assertEqual(len(titulos), 8, titulos)
         for titulo, tipo in zip(titulos, DECISOES):
             self.assertIn(f"`{tipo}`", titulo)
-        self.assertIn("Vermelhos", titulos[6])
+        self.assertIn("Vermelhos", titulos[7])
         self.assertRegex(texto, r"[Vv]ermelho nunca promove")
         self.assertIn("grafo-incerto.md", texto)
 

@@ -24,6 +24,10 @@ Gate (`decidir`, função pura), item a item — TODAS as linhas do fiscal do it
 
 Decisões do PO (`decisoes-<onda>.jsonl`), validadas inteiras antes de qualquer escrita; tipo desconhecido
 ou decisão malformada recusa a execução (ValueError → saída com a mensagem, nada gravado):
+  declarar_funcoes      {documento, funcoes: [nomes canônicos do parser: f, F, gamma, f_1, I_x, …]} — os
+                        símbolos que o PO declara funções naquele documento; quem os usa é a extração
+                        (`extrair_equacoes.py --decisoes`), ANTES dos momentos e do fiscal. Um por documento;
+                        documento sem candidato na onda recusa. O plano lista, por documento, o declarado.
   renomear_variavel     {equacao, simbolo, nome}
   conceito              {nome, tipo_conceito: fenomeno|principio|falacia|regime, definicao, sinonimos, fonte}
                         (`tipo` da linha é o tipo da decisão; o do conceito vai em `tipo_conceito`)
@@ -54,7 +58,8 @@ import re
 import sys
 import tokenize
 
-import fiscal             # vizinhos em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
+import extrair_equacoes   # vizinhos em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
+import fiscal
 import nucleo
 import recortar_trechos
 
@@ -75,6 +80,7 @@ CAMPOS_DECISAO = {
     "heuristica": ("nome", "enunciado", "condicao", "fonte", "sustenta"),
     "momento_fechado": ("equacao", "momento_fechado"),
     "rotular_equacao": ("equacao", "rotulo"),
+    "declarar_funcoes": ("documento", "funcoes"),
 }
 RE_ROTULO = re.compile(r"^[a-z][a-z0-9_]*$")
 TIPOS_DECISAO = tuple(sorted(set(CAMPOS_DECISAO) | {"aceitar_indeterminado"}))
@@ -163,7 +169,7 @@ def validar_decisoes(decisoes):
         onde = "decisão %d (%s)" % (n, tipo)
         textos = {"renomear_variavel": ("equacao", "simbolo", "nome"), "conceito": ("nome", "definicao"),
                   "heuristica": ("nome", "enunciado", "condicao"), "momento_fechado": ("equacao",),
-                  "rotular_equacao": ("equacao", "rotulo")}[tipo]
+                  "rotular_equacao": ("equacao", "rotulo"), "declarar_funcoes": ("documento",)}[tipo]
         for k in textos:
             if not _texto(d[k]):
                 raise ValueError("%s: `%s` vazio ou não texto" % (onde, k))
@@ -178,6 +184,8 @@ def validar_decisoes(decisoes):
             raise ValueError("%s: `sustenta` tem de ser lista de nomes" % onde)
         if tipo == "rotular_equacao" and not RE_ROTULO.match(d["rotulo"]):
             raise ValueError("%s: rotulo %r — use ^[a-z][a-z0-9_]*$" % (onde, d["rotulo"]))
+        if tipo == "declarar_funcoes":
+            extrair_equacoes.validar_declaracao_funcoes(d, onde)       # dono da sintaxe dos nomes: o parser
         if tipo == "momento_fechado":
             m = d["momento_fechado"]
             if not isinstance(m, dict) or not m or not all(_texto(k) and _texto(v) for k, v in m.items()):
@@ -185,7 +193,8 @@ def validar_decisoes(decisoes):
         por_tipo[tipo].append(d)
     for tipo, chave in (("renomear_variavel", ("equacao", "simbolo")), ("conceito", ("nome",)),
                         ("heuristica", ("nome",)), ("momento_fechado", ("equacao",)),
-                        ("rotular_equacao", ("equacao",)), ("rotular_equacao", ("rotulo",))):
+                        ("rotular_equacao", ("equacao",)), ("rotular_equacao", ("rotulo",)),
+                        ("declarar_funcoes", ("documento",))):
         vistos = set()
         for d in por_tipo[tipo]:
             k = tuple(d[c] for c in chave)
@@ -267,6 +276,11 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
     desconhecidas = sorted(set(rotulos) - set(por_nome))
     if desconhecidas:
         raise ValueError("rotular_equacao de equação desconhecida: %s" % ", ".join(desconhecidas))
+    funcoes = {d["documento"]: sorted(d["funcoes"], key=lambda f: f.encode("utf-8"))
+               for d in por_tipo["declarar_funcoes"]}
+    desconhecidos = sorted(set(funcoes) - {e["fonte"]["documento"] for e in equacoes})
+    if desconhecidos:
+        raise ValueError("declarar_funcoes de documento sem candidato na onda: %s" % ", ".join(desconhecidos))
 
     nomes_var = {(e["nome"], v["simbolo"]): v["nome"] for e in equacoes for v in e.get("variaveis") or []}
     for d in por_tipo["renomear_variavel"]:
@@ -403,8 +417,8 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
                              "status": status})
 
     nomes_doc = {json.loads(l["fonte"])["documento"] for l in plano_eq + conceitos + heuristicas}
-    documentos = [{"nome": n, "fonte": c({"documento": n, "topico": None}), "status": APROVADO}
-                  for n in sorted(nomes_doc)]
+    documentos = [{"nome": n, "fonte": c({"documento": n, "topico": None}), "status": APROVADO,
+                   "funcoes_declaradas": funcoes.get(n, [])} for n in sorted(nomes_doc)]
 
     for d in por_tipo["aceitar_indeterminado"]:
         casadas = [l for l in fiscal_linhas if identidade(l) == identidade(d)]
@@ -660,6 +674,10 @@ def linhas_do_plano(plano):
     for tipo in ("variaveis", "usa", "definida_por", "conceitos", "heuristicas", "sustenta", "documentos"):
         aprov = sum(1 for l in plano[tipo] if l["status"] == APROVADO)
         out.append("%s: %d (%d aprovado(s))" % (tipo, len(plano[tipo]), aprov))
+    # o que o PO declarou função muda o que parseia: o plano mostra, por documento, o que foi declarado
+    out.append("funções declaradas pelo PO (declarar_funcoes), por documento:")
+    out += ["  %s: %s" % (d["nome"], ", ".join(d.get("funcoes_declaradas") or []) or "nenhuma")
+            for d in plano["documentos"]]
     out += ["AVISO: %s" % a for a in plano["avisos"]]
     return out
 

@@ -25,19 +25,25 @@ documentos e são pulados.
   4. conferência: todo símbolo e toda função do resultado têm de ser um token inteiro do LaTeX
      normalizado (`TC` lido como `T·C` é `simbolo_partido:TC`); símbolo com nome de comando LaTeX
      (`mathrm`, `dots`, …), relação encadeada (`a = b = c`) e função aplicada que não veio de marcação
-     explícita (`p(1-p)`, `\\alpha(1-\\alpha)`, `g(x)`: `nao_suportado:p(`) também são perda.
+     explícita (`p(1-p)`, `\\alpha(1-\\alpha)`, `g(x)`: `nao_suportado:p(`) também são perda — salvo o
+     nome que o PO declarou função no documento (decisão `declarar_funcoes`, 05/10: `f(x)`, `F(x, λ)`,
+     `\\gamma(x)`); nome declarado usado também como símbolo na mesma equação é `nao_suportado:uso_misto:<f>`.
 Perda é ⚠️ com o LaTeX preservado como veio; nunca some.
 
 Uso:
   python3 extrair_equacoes.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/equacoes-<onda>.jsonl \
-      [--nivel 2]
+      [--nivel 2] [--decisoes _esteira/incerto/decisoes-<onda>.jsonl]
 `--nivel` é o nível do título que define o tópico (default 2), o MESMO do `recortar_trechos.py` da onda: se
 o manifesto do recorte (`trechos-<onda>.manifesto.json`, na pasta da `--saida`) existe e registra outro
 `nivel`, a extração recusa (o tópico citado não seria o de trecho nenhum).
+`--decisoes` (default: `decisoes-<onda>.jsonl` na pasta da `--saida`, lido só se existir; explícito e ausente
+falha): das decisões do PO, só as `declarar_funcoes` contam aqui — cada documento é parseado com as funções
+declaradas para ele. Declaração malformada, repetida ou de documento fora da onda recusa sem gravar.
 
 Saída: um candidato por linha (`status: "staging"`, `nome` = `<documento>#<ordem>` até o PO renomear,
 `latex`, `srepr`, `simbolos`, `variaveis`, `forma` — `algebrica` com `=`, `funcional` sem `=`, `perda` —,
-`motivo`, `fonte: {documento, topico}`), documentos em ordem de bytes, sem timestamp. A saída nunca é
+`motivo`, `fonte: {documento, topico}`, `funcoes_declaradas` — as do documento, ordenadas, `[]` sem declaração),
+documentos em ordem de bytes, sem timestamp. A saída nunca é
 sobrescrita com conteúdo diferente (o PO edita os `nome`): reexecução idêntica não muda nada.
 `sympy` só é importado dentro de função (decisão A6).
 """
@@ -265,19 +271,22 @@ def _perda(motivo):
     return {"ok": False, "srepr": None, "simbolos": [], "motivo": motivo}
 
 
-def parsear_latex(latex):
+def parsear_latex(latex, funcoes=frozenset()):
     """LaTeX → `{"ok", "srepr", "simbolos", "motivo"}` pela definição estrita de "parseável" (ver o topo).
+    `funcoes`: nomes canônicos (`f`, `F`, `gamma`, `n_F`) que o PO declarou funções no documento (decisão
+    `declarar_funcoes`); só esses viram aplicação de função — `p(1-p)` sem `p` declarada segue perda, e o nome
+    declarado que também aparece como símbolo na equação é `nao_suportado:uso_misto:<nome>`.
     Falta do `sympy`/`antlr4` sobe como ImportError (o portão diz "não medido", o CLI falha alto); qualquer
     outro erro inesperado é perda declarada `erro:<tipo>`, nunca um `ok`."""
     try:
-        return _parsear(latex)
+        return _parsear(latex, frozenset(funcoes))
     except ImportError:
         raise
     except Exception as e:
         return _perda("erro:%s" % type(e).__name__)
 
 
-def _parsear(latex):
+def _parsear(latex, funcoes):
     from sympy import Expr, Function, Max, Min, Symbol, srepr
     from sympy.core.function import AppliedUndef
     from sympy.core.relational import Relational
@@ -315,12 +324,17 @@ def _parsear(latex):
     except Exception:
         return _perda("strict")
 
-    # função aplicada só a que veio de marcação explícita (`\mathbb{E}[…]`, `E[…]`, `\operatorname{…}(…)`);
-    # `p(1-p)`, `\alpha(1-\alpha)`, `g(x)` seriam lidos como função: ambíguo, perda declarada
+    # função aplicada só a que veio de marcação explícita (`\mathbb{E}[…]`, `E[…]`, `\operatorname{…}(…)`)
+    # ou que o PO declarou função no documento (`funcoes`); `p(1-p)`, `\alpha(1-\alpha)`, `g(x)` seriam lidos
+    # como função: ambíguo, perda declarada
     for f in sorted(expr.atoms(AppliedUndef), key=lambda f: _bytes(type(f).__name__)):
         nome = type(f).__name__
-        if nome not in funcoes_de and nome not in ("max", "min"):
+        if nome not in funcoes_de and nome not in ("max", "min") and _canonico(nome) not in funcoes:
             return _perda("nao_suportado:%s(" % _canonico(nome))
+    # o nome declarado função que aparece também como símbolo (`f(x) = x f`): qual das leituras vale? perda
+    misto = sorted(funcoes & {simbolos_de.get(s.name, _canonico(s.name)) for s in expr.atoms(Symbol)}, key=_bytes)
+    if misto:
+        return _perda("nao_suportado:uso_misto:%s" % misto[0])
 
     troca = {}
     for s in expr.atoms(Symbol):
@@ -358,6 +372,45 @@ def _parsear(latex):
             "simbolos": sorted((s.name for s in expr.free_symbols), key=_bytes)}
 
 
+# nome canônico de símbolo como o parse o produz: letras, com um subscrito opcional (`f`, `gamma`, `f_1`,
+# `I_x`, `n_F`, `T_max`, `f_star`); é a sintaxe dos nomes da decisão `declarar_funcoes`
+RE_NOME_SIMBOLO = re.compile(r"^[A-Za-z]+(?:_[A-Za-z0-9]+)?$")
+CAMPOS_DECLARAR_FUNCOES = ("documento", "funcoes", "tipo")
+
+
+def validar_declaracao_funcoes(d, onde="declarar_funcoes"):
+    """ValueError se a decisão `{"tipo": "declarar_funcoes", "documento", "funcoes"}` for malformada:
+    documento texto não vazio; funcoes lista não vazia de nomes únicos na sintaxe de `RE_NOME_SIMBOLO`."""
+    if not isinstance(d, dict) or sorted(d) != list(CAMPOS_DECLARAR_FUNCOES):
+        raise ValueError("%s: chaves %s; esperadas %s" % (onde, sorted(d) if isinstance(d, dict) else d,
+                                                          list(CAMPOS_DECLARAR_FUNCOES)))
+    if not isinstance(d["documento"], str) or not d["documento"].strip():
+        raise ValueError("%s: `documento` vazio ou não texto" % onde)
+    funcoes = d["funcoes"]
+    if not isinstance(funcoes, list) or not funcoes:
+        raise ValueError("%s: `funcoes` tem de ser lista não vazia de nomes" % onde)
+    ruins = [f for f in funcoes if not isinstance(f, str) or not RE_NOME_SIMBOLO.match(f)]
+    if ruins:
+        raise ValueError("%s: nome de função fora da sintaxe dos símbolos do parser (%s): %r"
+                         % (onde, RE_NOME_SIMBOLO.pattern, ruins[0]))
+    if len(set(funcoes)) != len(funcoes):
+        raise ValueError("%s: nome de função repetido em `funcoes`" % onde)
+
+
+def funcoes_por_documento(decisoes):
+    """`{documento: frozenset(funcoes)}` das decisões `declarar_funcoes` (as outras são ignoradas aqui);
+    ValueError se alguma for malformada ou se um documento tiver mais de uma."""
+    por_doc = {}
+    for n, d in enumerate(decisoes, 1):
+        if not isinstance(d, dict) or d.get("tipo") != "declarar_funcoes":
+            continue
+        validar_declaracao_funcoes(d, "decisão %d (declarar_funcoes)" % n)
+        if d["documento"] in por_doc:
+            raise ValueError("decisão declarar_funcoes repetida: %s" % d["documento"])
+        por_doc[d["documento"]] = frozenset(d["funcoes"])
+    return por_doc
+
+
 def equacoes_do_documento(md, documento, nivel=2):
     """Um registro por bloco `$$…$$` não vazio: `documento`, `topico` (o do recorte no mesmo `nivel` de título),
     `ordem` (1, 2, … no documento) e `latex` (o conteúdo do bloco, sem os espaços das pontas)."""
@@ -379,12 +432,13 @@ def forma(resultado):
     return "algebrica" if resultado["srepr"].startswith("Equality(") else "funcional"
 
 
-def candidato(eq, onda):
-    r = parsear_latex(eq["latex"])
+def candidato(eq, onda, funcoes=frozenset()):
+    r = parsear_latex(eq["latex"], funcoes)
     return {"nome": "%s#%d" % (eq["documento"], eq["ordem"]), "status": "staging", "corpus": CORPUS, "onda": onda,
             "ordem": eq["ordem"], "latex": eq["latex"], "srepr": r["srepr"], "simbolos": r["simbolos"],
             "motivo": r["motivo"], "variaveis": [{"simbolo": s, "nome": s} for s in r["simbolos"]],
-            "forma": forma(r), "fonte": {"documento": eq["documento"], "topico": eq["topico"]}}
+            "forma": forma(r), "fonte": {"documento": eq["documento"], "topico": eq["topico"]},
+            "funcoes_declaradas": sorted(funcoes, key=_bytes)}
 
 
 def niveis_do_recorte(dir_esteira, onda):
@@ -395,6 +449,19 @@ def niveis_do_recorte(dir_esteira, onda):
         return None
     with io.open(caminho, encoding="utf-8") as f:
         return [e.get("nivel") for e in json.load(f).get("execucoes", [])]
+
+
+def ler_decisoes(caminho):
+    """As linhas do `decisoes-<onda>.jsonl` (JSON por linha; linha vazia é pulada). ValueError se uma não é JSON."""
+    linhas = []
+    with io.open(caminho, encoding="utf-8") as f:
+        for n, texto in enumerate(f, 1):
+            if texto.strip():
+                try:
+                    linhas.append(json.loads(texto))
+                except ValueError:
+                    raise ValueError("%s, linha %d: não é JSON" % (caminho, n))
+    return linhas
 
 
 def main(argv=None):
@@ -409,6 +476,9 @@ def main(argv=None):
     ap.add_argument("--saida", required=True, help="JSONL de candidatos, ex.: _esteira/incerto/equacoes-<onda>.jsonl")
     ap.add_argument("--nivel", type=int, default=2, help="nível do título do tópico (default 2: '## '); o mesmo "
                                                             "do recorte_trechos.py da onda")
+    ap.add_argument("--decisoes", help="decisões do PO (default: decisoes-<onda>.jsonl na pasta da --saida, lido só "
+                                       "se existir); as `declarar_funcoes` dizem que símbolos são funções em cada "
+                                       "documento")
     args = ap.parse_args(argv)
     if not recortar_trechos.RE_ONDA.match(args.onda) or ".." in args.onda:
         ap.error("--onda inválida: use ^[A-Za-z0-9][A-Za-z0-9._-]*$ sem '..'")
@@ -423,11 +493,26 @@ def main(argv=None):
                  "mesmo --nivel do recortar_trechos.py, ou o tópico citado não será o de trecho nenhum"
                  % (args.nivel, ", ".join(map(str, niveis)), args.onda))
 
+    # funções declaradas pelo PO, por documento (decisão `declarar_funcoes`); sem o arquivo, nenhuma
+    caminho_decisoes = args.decisoes or os.path.join(os.path.dirname(os.path.abspath(args.saida)),
+                                                     "decisoes-%s.jsonl" % args.onda)
+    if args.decisoes and not os.path.exists(args.decisoes):
+        sys.exit("--decisoes %s não existe" % args.decisoes)
+    try:
+        funcoes = funcoes_por_documento(ler_decisoes(caminho_decisoes)) if os.path.exists(caminho_decisoes) else {}
+    except ValueError as e:
+        sys.exit("recusado, nada gravado — declarar_funcoes em %s: %s" % (caminho_decisoes, e))
+    documentos = recortar_trechos.listar_documentos(dir_onda)
+    fora = sorted(set(funcoes) - {doc for _, doc, _ in documentos}, key=_bytes)
+    if fora:
+        sys.exit("recusado, nada gravado — declarar_funcoes de documento fora de %s: %s" % (dir_onda, ", ".join(fora)))
+
     cands = []
-    for caminho, doc, _ in recortar_trechos.listar_documentos(dir_onda):
+    for caminho, doc, _ in documentos:
         with io.open(caminho, encoding="utf-8", newline="") as f:
             md = f.read()
-        cands += [candidato(eq, args.onda) for eq in equacoes_do_documento(md, doc, args.nivel)]
+        cands += [candidato(eq, args.onda, funcoes.get(doc, frozenset()))
+                  for eq in equacoes_do_documento(md, doc, args.nivel)]
     texto = "".join(json.dumps(c, sort_keys=True, ensure_ascii=False) + "\n" for c in cands)
 
     estado = "novo"

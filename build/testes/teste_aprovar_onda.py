@@ -295,6 +295,51 @@ class TesteDecisoes(unittest.TestCase):
         self.assertEqual(AO.decidir([e], [], [], [p1("a"), p4m("a")], dec)["equacoes"][0]["status"], "aprovado")
 
 
+class TesteDeclararFuncoes(unittest.TestCase):
+    """Decisão do PO de 05/10: `declarar_funcoes` diz, por documento, que símbolos são funções (o
+    `extrair_equacoes.py --decisoes` os lê); validada com as outras, documento desconhecido recusado no gate."""
+
+    def dec(self, funcoes=("f", "F", "gamma", "H"), documento=DOC, **extra):
+        return dict({"tipo": "declarar_funcoes", "documento": documento,
+                     "funcoes": list(funcoes) if isinstance(funcoes, tuple) else funcoes}, **extra)
+
+    def test_linha_valida_passa(self):
+        for funcoes in (["f", "F", "gamma", "H"], ["f_1", "I_x", "n_F", "T_max"]):
+            por_tipo = AO.validar_decisoes([self.dec(funcoes)])
+            self.assertEqual(por_tipo["declarar_funcoes"], [self.dec(funcoes)])
+        self.assertIn("declarar_funcoes", AO.TIPOS_DECISAO)
+        plano = AO.decidir([eq_fixa("a")], [], [], [p1("a")], [self.dec()])
+        self.assertEqual(plano["equacoes"][0]["status"], "aprovado")
+
+    def test_malformada_e_recusada(self):
+        for d in (self.dec([]), self.dec(["f", "f"]), self.dec(["f'"]), self.dec(["S^N"]), self.dec(["1f"]),
+                  self.dec(["f_"]), self.dec([""]), self.dec([3]), self.dec("f"), self.dec(documento=""),
+                  self.dec(documento="  "), self.dec(documento=None), self.dec(extra=1),
+                  {"tipo": "declarar_funcoes", "documento": DOC}):
+            with self.subTest(d=d), self.assertRaises(ValueError):
+                AO.validar_decisoes([d])
+
+    def test_duas_declaracoes_do_mesmo_documento_sao_recusadas(self):
+        with self.assertRaises(ValueError) as c:
+            AO.validar_decisoes([self.dec(["f"]), self.dec(["F"])])
+        self.assertIn("declarar_funcoes", str(c.exception))
+        AO.validar_decisoes([self.dec(["f"]), self.dec(["f"], documento="Outro.pdf.md")])   # outro documento: ok
+
+    def test_documento_desconhecido_e_recusado_no_gate(self):
+        with self.assertRaises(ValueError) as c:
+            AO.decidir([eq_fixa("a")], [], [], [p1("a")], [self.dec(documento="Fantasma.pdf.md")])
+        self.assertIn("Fantasma.pdf.md", str(c.exception))
+
+    def test_plano_lista_as_funcoes_declaradas_por_documento(self):
+        outro = eq_fixa("b", fonte={"documento": "Outro.pdf.md", "topico": "T"})
+        plano = AO.decidir([eq_fixa("a"), outro], [], [], [p1("a"), p1("b")], [self.dec(["gamma", "F", "f"])])
+        funcoes = {d["nome"]: d["funcoes_declaradas"] for d in plano["documentos"]}
+        self.assertEqual(funcoes, {DOC: ["F", "f", "gamma"], "Outro.pdf.md": []})
+        texto = "\n".join(AO.linhas_do_plano(plano))
+        self.assertIn("%s: F, f, gamma" % DOC, texto)
+        self.assertIn("Outro.pdf.md: nenhuma", texto)
+
+
 class TesteRotular(unittest.TestCase):
     """I4: `rotular_equacao` dá à equação o rótulo estável (`kappa`, `hill`, …) com que o relatório e o MCP a
     acham; rótulo repetido no plano ou já em outra :Equacao do corpus recusa antes de qualquer escrita."""
@@ -553,10 +598,14 @@ class TesteAplicarMomentos(BaseOnda):
 
 class TesteFimAFim(unittest.TestCase):
     """Extração real → fiscal → registrar_prova → fiscal → gate, sem banco: a média da Pareto só sai aprovada
-    com o momento declarado e provado na via Wolfram; a derivação de Kelly, com as duas vias verdes."""
+    com o momento declarado e provado na via Wolfram; a derivação de Kelly, com as duas vias verdes; e a
+    eq. (1) de Convex_Responses só parseia (e sai aprovada) depois que o PO declara `F` e `f` funções."""
     ONDA_E2E = "2026-10-E2E"
     DOC_MD = ("## Pareto\n\n$$\\mathbb{E}[X] = \\frac{\\alpha L}{\\alpha - 1}$$\n\n"
               "## Kelly\n\n$$\\frac{p b}{1 + b f} - \\frac{1 - p}{1 - f} = 0$$\n\n$$f = p - \\frac{1 - p}{b}$$\n")
+    # outro documento: no de Kelly `f` é variável, e declará-la função lá seria `uso_misto:f`
+    DOC_CONVEXO = ("## Convexidade\n\n"
+                   "$$F(x, \\lambda) = \\frac{f(x + \\lambda) + f(x - \\lambda)}{2} - f(x) \\tag{1}$$\n")
     # gabaritos de references/fiscal.md, verbatim
     CODIGO_MEDIA = ("FullSimplify[Expectation[x, x \\[Distributed] ParetoDistribution[L, alpha], Assumptions -> "
                     "alpha > 1 && L > 0] - (alpha L/(alpha - 1)), Assumptions -> alpha > 1 && L > 0]\n")
@@ -570,8 +619,9 @@ class TesteFimAFim(unittest.TestCase):
         self.esteira = os.path.join(self.tmp, "_esteira", "incerto")
         conf = os.path.join(self.tmp, "conferidos", self.ONDA_E2E)
         os.makedirs(conf)
-        with io.open(os.path.join(conf, "Taleb.pdf.md"), "w", encoding="utf-8", newline="\n") as f:
-            f.write(self.DOC_MD)
+        for nome, conteudo in (("Taleb.pdf.md", self.DOC_MD), ("Convex_Responses.pdf.md", self.DOC_CONVEXO)):
+            with io.open(os.path.join(conf, nome), "w", encoding="utf-8", newline="\n") as f:
+                f.write(conteudo)
 
     def arq(self, prefixo):
         return os.path.join(self.esteira, "%s-%s.jsonl" % (prefixo, self.ONDA_E2E))
@@ -634,6 +684,36 @@ class TesteFimAFim(unittest.TestCase):
         self.assertEqual((eqs[media]["status"], eqs[media]["pendencias"]), ("aprovado", []))
         self.assertEqual(json.loads(eqs[media]["momento_fechado"]), {"media": "alpha*L/(alpha - 1)"})
         self.assertEqual(plano["deriva_de"][0]["status"], "aprovado")
+
+        # 3. Convex_Responses (1): sem declaração é perda (`F(` ambíguo) e P1 vermelho; o PO declara `F` e `f`
+        convexa = "Convex_Responses.pdf.md#1"
+        self.assertEqual(eqs[convexa]["status"], "staging")
+        self.assertIn("nao_suportado:F(", " ".join(eqs[convexa]["pendencias"]))
+        with io.open(self.arq("decisoes"), "a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps({"tipo": "declarar_funcoes", "documento": "Convex_Responses.pdf.md", "funcoes": ["f", "F"]},
+                               sort_keys=True, ensure_ascii=False) + "\n")
+        # a extração recusa sobrescrever o candidato antigo (com o momento aplicado): o rito o tira do caminho,
+        # reextrai com --decisoes, reaplica os momentos e refaz o fiscal
+        with self.assertRaises(SystemExit):
+            self.cli(EQ, "--raiz", self.tmp, "--onda", self.ONDA_E2E, "--saida", self.arq("equacoes"))
+        os.replace(self.arq("equacoes"), self.arq("equacoes") + ".antes-de-declarar-funcoes")
+        self.assertEqual(self.cli(EQ, "--raiz", self.tmp, "--onda", self.ONDA_E2E, "--saida", self.arq("equacoes"),
+                                  "--decisoes", self.arq("decisoes")), 0)
+        self.assertEqual(self.cli(AO, "--onda", self.ONDA_E2E, "--raiz-esteira", self.esteira, "--aplicar-momentos"), 0)
+        self.fiscal()
+        p1_convexa = [l for l in ler_jsonl(self.arq("fiscal")) if l["prova"] == "P1" and l["equacao"] == convexa]
+        self.assertEqual([l["veredito"] for l in p1_convexa], ["verde"])
+        plano = self.plano()
+        eqs = {e["nome"]: e for e in plano["equacoes"]}
+        self.assertEqual((eqs[convexa]["status"], eqs[convexa]["forma"], eqs[convexa]["pendencias"]),
+                         ("aprovado", "algebrica", []))
+        self.assertIn("Function('F')", eqs[convexa]["sympy_srepr"])
+        self.assertEqual({d["nome"]: d["funcoes_declaradas"] for d in plano["documentos"]},
+                         {"Convex_Responses.pdf.md": ["F", "f"], "Taleb.pdf.md": []})
+        self.assertEqual({e["fonte"]["documento"]: e["funcoes_declaradas"] for e in ler_jsonl(self.arq("equacoes"))},
+                         {"Convex_Responses.pdf.md": ["F", "f"], "Taleb.pdf.md": []})
+        # as provas Wolfram da média e de Kelly seguem válidas: o srepr delas não mudou
+        self.assertEqual((eqs[media]["status"], plano["deriva_de"][0]["status"]), ("aprovado", "aprovado"))
 
 
 @precisa_neo4j

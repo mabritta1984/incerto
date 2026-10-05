@@ -237,6 +237,63 @@ class TesteParse(unittest.TestCase):
         self.assertEqual(a, parsear_latex(r"\frac{p b}{1 + b f} - \frac{1 - p}{1 - f} = 0"))
 
 
+# Convex_Responses.pdf, eq. (1), como o mineiro a converteu
+CONVEX_1 = r"F(x, \lambda) = \frac{f(x + \lambda) + f(x - \lambda)}{2} - f(x) \tag{1}"
+
+
+class TesteFuncoesDeclaradas(unittest.TestCase):
+    """Decisão do PO de 05/10: só o símbolo que o PO declara função, no documento, vira aplicação de função;
+    todo o resto segue a regra estrita (`p(1-p)` continua perda declarada)."""
+
+    def test_convex_1_parseia_com_f_e_F_declaradas(self):
+        r = parsear_latex(CONVEX_1, funcoes=frozenset({"F", "f"}))
+        self.assertTrue(r["ok"], r["motivo"])
+        self.assertIn("Function('F')", r["srepr"]); self.assertIn("Function('f')", r["srepr"])
+        self.assertTrue(r["srepr"].startswith("Equality("))
+        self.assertEqual(r["simbolos"], ["lambda", "x"])
+
+    def test_sem_declaracao_segue_perda(self):
+        self.assertEqual(parsear_latex(CONVEX_1)["motivo"], "nao_suportado:F(")
+        for funcoes in (frozenset(), frozenset({"f"})):
+            with self.subTest(funcoes=funcoes):
+                r = parsear_latex(CONVEX_1, funcoes=funcoes)
+                self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:F(")
+
+    def test_produto_nao_declarado_segue_perda(self):
+        r = parsear_latex(r"\sigma^2 = p(1-p)", funcoes=frozenset({"f"}))
+        self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:p(")
+
+    def test_funcao_declarada_tambem_usada_como_simbolo_e_uso_misto(self):
+        r = parsear_latex(r"f(x) = x f", funcoes=frozenset({"f"}))
+        self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:uso_misto:f")
+        self.assertIsNone(r["srepr"])
+
+    def test_nome_composto_aplicado_so_se_declarado(self):
+        latex = r"n_F(t) = n_0 \exp(\gamma(x)t)"
+        r = parsear_latex(latex, funcoes=frozenset({"gamma"}))
+        self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:n_F(")
+        r = parsear_latex(latex, funcoes=frozenset({"gamma", "n_F"}))
+        self.assertTrue(r["ok"], r["motivo"])
+        self.assertIn("Function('gamma')", r["srepr"]); self.assertIn("Function('n_F')", r["srepr"])
+        self.assertEqual(r["simbolos"], ["n_0", "t", "x"])
+
+    def test_checagens_estritas_seguem_valendo_com_funcoes(self):
+        f = frozenset({"f", "F"})
+        casos = {r"f(x) = a = b": "nao_suportado:relacao_encadeada",
+                 r"f(x) = \Pr(X)": r"nao_suportado:\Pr",
+                 r"f(x) = TC": "simbolo_partido:TC",
+                 r"f'(x) = 1": "nao_suportado:f'(",            # derivada lida como outra função, `f'`
+                 r"f(x) = g(x)": "nao_suportado:g("}
+        for latex, motivo in casos.items():
+            with self.subTest(latex=latex):
+                r = parsear_latex(latex, funcoes=f)
+                self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], motivo)
+
+    def test_deterministico_e_independe_da_ordem_das_funcoes(self):
+        a = parsear_latex(CONVEX_1, funcoes=frozenset({"F", "f"}))
+        self.assertEqual(a, parsear_latex(CONVEX_1, funcoes=frozenset({"f", "F", "H"})))
+
+
 class TesteDocumento(unittest.TestCase):
     def test_equacoes_do_documento_herdam_topico(self):
         md = "## Kelly\n\ntexto\n\n$$f = p - \\frac{1-p}{b}$$\n\n## Pareto\n\n$$E = 3$$\n"
@@ -367,6 +424,85 @@ class TesteCLI(unittest.TestCase):
         for onda in ("../x", "nao-existe"):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
                 self.rodar(onda)
+
+
+class TesteCLIFuncoes(unittest.TestCase):
+    """`--decisoes`: as funções que o PO declarou em um documento valem só nele; cada candidato registra as
+    `funcoes_declaradas` do seu documento (lista ordenada, vazia sem declaração)."""
+    ONDA_F = "2026-10-F"
+
+    def setUp(self):
+        self.raiz = tempfile.mkdtemp(prefix="incerto-fn-")
+        self.addCleanup(shutil.rmtree, self.raiz)
+        conf = os.path.join(self.raiz, "conferidos", self.ONDA_F)
+        os.makedirs(conf)
+        for doc in ("A.pdf.md", "B.pdf.md"):
+            with io.open(os.path.join(conf, doc), "w", encoding="utf-8", newline="\n") as f:
+                f.write("## Convexidade\n\n$$%s$$\n\n$$\\sigma^2 = p(1-p)$$\n" % CONVEX_1)
+        self.esteira = os.path.join(self.raiz, "_esteira", "incerto")
+        os.makedirs(self.esteira)
+        self.saida = os.path.join(self.esteira, "equacoes-%s.jsonl" % self.ONDA_F)
+        self.decisoes = os.path.join(self.esteira, "decisoes-%s.jsonl" % self.ONDA_F)
+
+    def escrever_decisoes(self, caminho, linhas):
+        with io.open(caminho, "w", encoding="utf-8", newline="\n") as f:
+            for l in linhas:
+                f.write(json.dumps(l, sort_keys=True, ensure_ascii=False) + "\n")
+
+    def rodar(self, *extra):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return EQ.main(["--raiz", self.raiz, "--onda", self.ONDA_F, "--saida", self.saida] + list(extra))
+
+    def candidatos(self):
+        with io.open(self.saida, encoding="utf-8") as f:
+            return {c["nome"]: c for c in map(json.loads, f)}
+
+    def test_funcao_declarada_vale_so_no_seu_documento(self):
+        self.escrever_decisoes(self.decisoes, [
+            {"tipo": "declarar_funcoes", "documento": "A.pdf.md", "funcoes": ["f", "F"]},
+            {"tipo": "conceito", "nome": "x"}])                       # outros tipos não são da extração
+        self.assertEqual(self.rodar(), 0)                              # padrão: decisoes-<onda>.jsonl ao lado
+        c = self.candidatos()
+        self.assertEqual((c["A.pdf.md#1"]["forma"], c["A.pdf.md#1"]["funcoes_declaradas"]), ("algebrica", ["F", "f"]))
+        self.assertIn("Function('F')", c["A.pdf.md#1"]["srepr"])
+        self.assertEqual((c["B.pdf.md#1"]["motivo"], c["B.pdf.md#1"]["funcoes_declaradas"]), ("nao_suportado:F(", []))
+        for doc in ("A", "B"):                                          # `p(1-p)` segue perda nos dois
+            self.assertEqual(c["%s.pdf.md#2" % doc]["motivo"], "nao_suportado:p(")
+        with io.open(self.saida, encoding="utf-8") as f:
+            antes = f.read()
+        self.assertEqual(self.rodar(), 0)                              # determinismo: reexecução idêntica
+        with io.open(self.saida, encoding="utf-8") as f:
+            self.assertEqual(f.read(), antes)
+
+    def test_sem_arquivo_de_decisoes_nada_e_funcao(self):
+        self.assertEqual(self.rodar(), 0)
+        self.assertEqual({n: (c["forma"], c["funcoes_declaradas"]) for n, c in self.candidatos().items()},
+                         {n: ("perda", []) for n in ("A.pdf.md#1", "A.pdf.md#2", "B.pdf.md#1", "B.pdf.md#2")})
+
+    def test_decisoes_em_outro_caminho(self):
+        outro = os.path.join(self.raiz, "minhas-decisoes.jsonl")
+        self.escrever_decisoes(outro, [{"tipo": "declarar_funcoes", "documento": "B.pdf.md", "funcoes": ["F", "f"]}])
+        self.assertEqual(self.rodar("--decisoes", outro), 0)
+        c = self.candidatos()
+        self.assertEqual((c["A.pdf.md#1"]["forma"], c["B.pdf.md#1"]["forma"]), ("perda", "algebrica"))
+
+    def test_declaracao_malformada_ou_de_documento_fora_da_onda_recusa_sem_gravar(self):
+        for linhas in ([{"tipo": "declarar_funcoes", "documento": "A.pdf.md", "funcoes": []}],
+                       [{"tipo": "declarar_funcoes", "documento": "A.pdf.md", "funcoes": ["f"]},
+                        {"tipo": "declarar_funcoes", "documento": "A.pdf.md", "funcoes": ["F"]}],
+                       [{"tipo": "declarar_funcoes", "documento": "Z.pdf.md", "funcoes": ["f"]}]):
+            with self.subTest(linhas=linhas):
+                self.escrever_decisoes(self.decisoes, linhas)
+                with self.assertRaises(SystemExit) as c:
+                    self.rodar()
+                self.assertIn("declarar_funcoes", str(c.exception.code))
+                self.assertFalse(os.path.exists(self.saida))
+
+    def test_decisoes_explicito_ausente_falha_alto(self):
+        with self.assertRaises(SystemExit) as c:
+            self.rodar("--decisoes", os.path.join(self.raiz, "nao-existe.jsonl"))
+        self.assertIn("nao-existe.jsonl", str(c.exception.code))
+        self.assertFalse(os.path.exists(self.saida))
 
 
 class TestePortao(unittest.TestCase):

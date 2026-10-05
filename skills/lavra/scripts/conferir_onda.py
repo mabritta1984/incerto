@@ -190,7 +190,9 @@ def _ordenado(d):
 
 def parseaveis_sympy(docs):
     """`{"parseaveis", "total"}` dos blocos `$$…$$` dos `.md` legíveis, pela definição estrita de "parseável"
-    do `extrair_equacoes.py` (decisão 2 do PO, 28/09); None só se o import dele ou do `sympy` falhar."""
+    do `extrair_equacoes.py` (decisão 2 do PO, 28/09); None só se o import dele ou do `sympy` falhar.
+    Chama `parsear_latex` SEM funções declaradas: o portão mede antes da rodada do PO, e as decisões
+    `declarar_funcoes` (que mudam o que parseia) só entram depois, na extração (`extrair_equacoes.py --decisoes`)."""
     try:
         from extrair_equacoes import equacoes_do_documento, parsear_latex   # vizinho; decisão 1b
         n = total = 0

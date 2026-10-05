@@ -317,6 +317,29 @@ class TesteP4(unittest.TestCase):
         p4 = self.p4(provas(editada, [], [], indice(w)))[0]
         self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("prova Wolfram desatualizada", p4["detalhe"])
 
+    def test_reextrair_com_funcao_declarada_desatualiza_a_prova_wolfram(self):
+        # decisão do PO de 05/10 (`declarar_funcoes`): a reextração muda o `srepr`, que está na `impressao`;
+        # a prova registrada sobre a extração antiga deixa de valer, nas duas formas de prova Wolfram
+        eq = {"documento": "Taleb.pdf.md", "topico": "T", "ordem": 1,
+              "latex": r"m = \frac{F(\alpha, L)}{\alpha - 1}"}
+        momento = {"media": "F(alpha, L)/(alpha - 1)"}
+        antes = [dict(EQ.candidato(eq, ONDA), momento_fechado=momento)]
+        depois = [dict(EQ.candidato(eq, ONDA, frozenset({"F"})), momento_fechado=momento)]
+        self.assertEqual((antes[0]["motivo"], depois[0]["forma"]), ("nao_suportado:F(", "algebrica"))
+        self.assertEqual((antes[0]["funcoes_declaradas"], depois[0]["funcoes_declaradas"]), ([], ["F"]))
+        w = wolfram_momento("Taleb.pdf.md#1", "verde", "Out[1]= 0", (antes, []))
+        self.assertEqual(self.p4(provas(antes, [], [], indice(w)))[0]["veredito"], "verde")
+        p4 = self.p4(provas(depois, [], [], indice(w)))[0]
+        self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("prova Wolfram desatualizada", p4["detalhe"])
+        self.assertNotEqual(FI.impressao_esperada(("momento", "Taleb.pdf.md#1"), antes, []),
+                            FI.impressao_esperada(("momento", "Taleb.pdf.md#1"), depois, []))
+        # P2: a mãe que passa a parsear muda a impressão da derivação também
+        filha = {"documento": "Taleb.pdf.md", "topico": "T", "ordem": 2, "latex": r"F(\alpha, L) = m (\alpha - 1)"}
+        ders = [{"mae": "Taleb.pdf.md#1", "filha": "Taleb.pdf.md#2", "alvo": "m", "substituicao": {}}]
+        com = lambda fs: [EQ.candidato(eq, ONDA, fs), EQ.candidato(filha, ONDA, fs)]
+        self.assertNotEqual(FI.impressao_esperada(("P2", "Taleb.pdf.md#1", "Taleb.pdf.md#2"), com(frozenset()), ders),
+                            FI.impressao_esperada(("P2", "Taleb.pdf.md#1", "Taleb.pdf.md#2"), com(frozenset({"F"})), ders))
+
     def test_impressao_e_sha256_do_conteudo_declarado(self):
         conteudo = {"mae_srepr": self.eqs[0]["srepr"], "filha_srepr": self.eqs[1]["srepr"], "simbolo": "f",
                     "substituicao": {}}
