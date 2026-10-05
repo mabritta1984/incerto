@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Fiscal algébrico da onda: nada sai de staging sem ele, e prova vermelha nunca promove.
+"""Fiscal de duas vias da onda: nada sai de staging sem ele, e prova vermelha nunca promove.
 
 Provas (uma linha por prova; `prova`, `alvo`, `veredito` ∈ verde|vermelho|indeterminado, `detalhe`, `ms`):
   Chaves estruturadas por prova (além de `alvo`, mantido por compatibilidade): P1 `equacao`; P2 `mae`,
@@ -14,8 +14,23 @@ Provas (uma linha por prova; `prova`, `alvo`, `veredito` ∈ verde|vermelho|inde
                  mãe e o símbolo vão no `detalhe`).
   P3 validade  — toda linha de `validades-<onda>.jsonl` (`{"equacao", "condicao"}`):
                  `relacional_parseia(condicao, simbolos da equação)`. `alvo` = nome da equação.
-A Task 10 acrescenta a via Wolfram (P4) à tabela `PROVAS`; `--provas-wolfram` já é aceito e, por ora,
-não é usado.
+  P4 duas vias — a segunda via, Wolfram, rodada pelo AGENTE pelo MCP (nunca por script), registrada por
+                 `registrar_prova.py` em `provas-<onda>.jsonl` e conferida aqui (protocolo: dono único em
+                 `references/fiscal.md`). Para toda linha P2 (chave `mae` + `filha`; `alvo` = filha) exige a
+                 prova Wolfram `{"prova": "P2", "mae", "filha", …}`; para todo candidato com `momento_fechado`
+                 não vazio (`alvo` = `equacao` = nome) exige `{"prova": "momento", "equacao", …}`. Sem prova →
+                 vermelho "sem prova Wolfram". Derivação: veredito Wolfram ≠ veredito SymPy → vermelho "vias
+                 divergem", com o `detalhe` da P2 e a `saida` Wolfram verbatim no `detalhe` (SymPy
+                 indeterminado + Wolfram verde também diverge: indeterminado é pauta do PO na Task 11, não da
+                 P4); vias iguais → o veredito comum ("vias concordam"). Momento: não há via SymPy; a P4 tem o
+                 veredito da prova Wolfram. Chaves estruturadas da P4: `mae`, `filha` (derivação) ou `equacao`
+                 (momento).
+`provas_sympy` roda só P1–P3; `provas` roda a tabela `PROVAS` inteira (P1–P4), que é o que a CLI grava.
+
+`provas_wolfram(caminho)`: lê `provas-<onda>.jsonl` (ausente = nenhuma prova) e indexa por
+`chave_wolfram` — `("P2", mae, filha)` ou `("momento", equacao)`; linha malformada (chaves fora do
+formato, `via` ≠ wolfram, `prova` ou `veredito` desconhecidos) ou chave repetida → `ValueError` (a CLI
+sai com a mensagem): prova ambígua não é prova.
 
 `equivalente`: os `srepr` viram expressão por `sympy.sympify`; a `substituicao` ({símbolo: expressão em
 sintaxe SymPy}) é aplicada aos dois lados; a filha tem de ser `Equality` com lado esquerdo exatamente
@@ -36,7 +51,7 @@ entre os símbolos da equação; função não definida no SymPy (`g(x)`) não �
 
 Uso:
   python3 fiscal.py --onda <onda> [--raiz-esteira _esteira/incerto] [--relatorio <md>]
-                    [--provas-wolfram _esteira/incerto/provas-<onda>.jsonl]
+                    [--provas-wolfram <jsonl>]      (padrão: <raiz-esteira>/provas-<onda>.jsonl)
 
 Grava o relatório Markdown (`--relatorio`, padrão `<raiz-esteira>/fiscal-<onda>.md`; tabela `prova |
 alvo | veredito | detalhe | ms`) e `<raiz-esteira>/fiscal-<onda>.jsonl` (uma linha por prova, chaves
@@ -56,6 +71,10 @@ import tokenize
 import recortar_trechos   # vizinho em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
 
 VERDE, VERMELHO, INDETERMINADO = "verde", "vermelho", "indeterminado"
+VEREDITOS = (VERDE, VERMELHO, INDETERMINADO)
+VIA_WOLFRAM = "wolfram"
+# `prova` de uma linha de `provas-<onda>.jsonl` → chaves que a identificam (e com que a P4 a junta à onda)
+CHAVES_WOLFRAM = {"P2": ("mae", "filha"), "momento": ("equacao",)}
 
 
 def _ordenado(exprs):
@@ -175,7 +194,55 @@ def relacional_parseia(condicao, simbolos):
         return False
 
 
-# --- provas: cada uma recebe o contexto e devolve linhas sem `ms`; a Task 10 acrescenta P4 ---------------
+# --- provas Wolfram registradas -----------------------------------------------------------------------
+
+def chave_wolfram(linha):
+    """`("P2", mae, filha)` ou `("momento", equacao)`: a identidade de uma prova Wolfram registrada."""
+    prova = linha.get("prova")
+    if prova not in CHAVES_WOLFRAM:
+        raise ValueError("prova Wolfram desconhecida: %r (use %s)" % (prova, " ou ".join(sorted(CHAVES_WOLFRAM))))
+    return (prova,) + tuple(linha.get(k) for k in CHAVES_WOLFRAM[prova])
+
+
+def validar_prova_wolfram(linha):
+    """Levanta `ValueError` se `linha` não estiver exatamente no formato de `registrar_prova.py`."""
+    if not isinstance(linha, dict):
+        raise ValueError("linha não é objeto JSON")
+    chave_wolfram(linha)
+    esperadas = {"prova", "via", "codigo", "saida", "veredito"} | set(CHAVES_WOLFRAM[linha["prova"]])
+    if set(linha) != esperadas:
+        raise ValueError("chaves %s; esperadas %s" % (sorted(linha), sorted(esperadas)))
+    if linha["via"] != VIA_WOLFRAM:
+        raise ValueError("via %r; esperada %r" % (linha["via"], VIA_WOLFRAM))
+    if linha["veredito"] not in VEREDITOS:
+        raise ValueError("veredito %r; use %s" % (linha["veredito"], "|".join(VEREDITOS)))
+    for k in esperadas - {"prova", "via", "veredito"}:
+        if not isinstance(linha[k], str) or not linha[k].strip():
+            raise ValueError("`%s` vazio ou não texto" % k)
+
+
+def provas_wolfram(caminho):
+    """`provas-<onda>.jsonl` indexado por `chave_wolfram`; arquivo ausente = nenhuma prova."""
+    if not os.path.exists(caminho):
+        return {}
+    indice = {}
+    with io.open(caminho, encoding="utf-8") as f:
+        for n, texto in enumerate(f, 1):
+            if not texto.strip():
+                continue
+            try:
+                linha = json.loads(texto)
+                validar_prova_wolfram(linha)
+            except ValueError as e:
+                raise ValueError("%s, linha %d: %s" % (caminho, n, e))
+            chave = chave_wolfram(linha)
+            if chave in indice:
+                raise ValueError("%s, linha %d: prova repetida %s" % (caminho, n, "/".join(chave)))
+            indice[chave] = linha
+    return indice
+
+
+# --- provas: cada uma recebe o contexto e devolve linhas sem `ms` ---------------------------------------
 
 def _p1_parse(ctx):
     for eq in ctx["equacoes"]:
@@ -218,14 +285,44 @@ def _p3_validade(ctx):
                    % condicao)
 
 
-PROVAS = (("P1", _p1_parse), ("P2", _p2_derivacao), ("P3", _p3_validade))
+def _p4_duas_vias(ctx):
+    wolfram = ctx["wolfram"]
+    for p2 in [l for l in ctx["linhas"] if l["prova"] == "P2"]:
+        mae, filha = p2["mae"], p2["filha"]
+        chaves = {"alvo": filha, "mae": mae, "filha": filha}
+        w = wolfram.get(("P2", mae, filha))
+        if w is None:
+            yield dict(chaves, veredito=VERMELHO, detalhe="sem prova Wolfram para a derivação de %s a %s" % (mae, filha))
+        elif w["veredito"] != p2["veredito"]:
+            yield dict(chaves, veredito=VERMELHO, detalhe="vias divergem — SymPy %s: %s — Wolfram %s: %s"
+                       % (p2["veredito"], p2["detalhe"], w["veredito"], w["saida"]))
+        else:
+            yield dict(chaves, veredito=p2["veredito"], detalhe="vias concordam (%s) — SymPy: %s — Wolfram: %s"
+                       % (p2["veredito"], p2["detalhe"], w["saida"]))
+    for eq in ctx["equacoes"]:
+        momento = eq.get("momento_fechado")
+        if not momento:
+            continue
+        nome = eq["nome"]
+        chaves = {"alvo": nome, "equacao": nome}
+        declarado = json.dumps(momento, sort_keys=True, ensure_ascii=False)
+        w = wolfram.get(("momento", nome))
+        if w is None:
+            yield dict(chaves, veredito=VERMELHO, detalhe="sem prova Wolfram para o momento fechado %s" % declarado)
+        else:
+            yield dict(chaves, veredito=w["veredito"], detalhe="momento fechado %s — Wolfram %s: %s"
+                       % (declarado, w["veredito"], w["saida"]))
 
 
-def provas_sympy(equacoes, derivacoes, validades):
-    ctx = {"equacoes": equacoes, "derivacoes": derivacoes, "validades": validades,
-           "por_nome": {e["nome"]: e for e in equacoes}}
+PROVAS_SYMPY = (("P1", _p1_parse), ("P2", _p2_derivacao), ("P3", _p3_validade))
+PROVAS = PROVAS_SYMPY + (("P4", _p4_duas_vias),)
+
+
+def _executar(tabela, equacoes, derivacoes, validades, wolfram):
     linhas = []
-    for prova, executar in PROVAS:
+    ctx = {"equacoes": equacoes, "derivacoes": derivacoes, "validades": validades, "wolfram": wolfram,
+           "por_nome": {e["nome"]: e for e in equacoes}, "linhas": linhas}
+    for prova, executar in tabela:
         gerador = executar(ctx)
         while True:
             inicio = time.perf_counter()
@@ -237,6 +334,16 @@ def provas_sympy(equacoes, derivacoes, validades):
             linha["prova"] = prova
             linhas.append(linha)
     return linhas
+
+
+def provas_sympy(equacoes, derivacoes, validades):
+    """Só a via SymPy (P1–P3)."""
+    return _executar(PROVAS_SYMPY, equacoes, derivacoes, validades, {})
+
+
+def provas(equacoes, derivacoes, validades, wolfram):
+    """As duas vias (P1–P4); `wolfram` é o índice de `provas_wolfram`."""
+    return _executar(PROVAS, equacoes, derivacoes, validades, wolfram)
 
 
 # --- saídas -----------------------------------------------------------------------------------------
@@ -288,7 +395,8 @@ def main(argv=None):
     ap.add_argument("--onda", required=True, help="onda: lê <raiz-esteira>/{equacoes,derivacoes,validades}-<onda>.jsonl")
     ap.add_argument("--raiz-esteira", default="_esteira/incerto", help="pasta dos JSONL da onda (padrão: _esteira/incerto)")
     ap.add_argument("--relatorio", help="relatório Markdown (padrão: <raiz-esteira>/fiscal-<onda>.md)")
-    ap.add_argument("--provas-wolfram", help="provas Wolfram registradas — aceito, mas ainda NÃO usado (a via P4 vem na Task 10)")
+    ap.add_argument("--provas-wolfram", help="provas Wolfram registradas por registrar_prova.py "
+                                             "(padrão: <raiz-esteira>/provas-<onda>.jsonl)")
     args = ap.parse_args(argv)
     if not recortar_trechos.RE_ONDA.match(args.onda) or ".." in args.onda:
         ap.error("--onda inválida: use ^[A-Za-z0-9][A-Za-z0-9._-]*$ sem '..'")
@@ -296,8 +404,12 @@ def main(argv=None):
     def arquivo(prefixo, ext="jsonl"):
         return os.path.join(args.raiz_esteira, "%s-%s.%s" % (prefixo, args.onda, ext))
 
-    linhas = provas_sympy(_ler_jsonl(arquivo("equacoes"), obrigatorio=True),
-                          _ler_jsonl(arquivo("derivacoes")), _ler_jsonl(arquivo("validades")))
+    equacoes = _ler_jsonl(arquivo("equacoes"), obrigatorio=True)
+    try:
+        wolfram = provas_wolfram(args.provas_wolfram or arquivo("provas"))
+    except ValueError as e:
+        sys.exit("provas Wolfram inválidas — %s" % e)
+    linhas = provas(equacoes, _ler_jsonl(arquivo("derivacoes")), _ler_jsonl(arquivo("validades")), wolfram)
     caminho_md = args.relatorio or arquivo("fiscal", "md")
     _gravar(caminho_md, relatorio(args.onda, linhas))
     _gravar(arquivo("fiscal"), jsonl(linhas))

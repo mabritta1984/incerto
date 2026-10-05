@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Task 9: fiscal.py — fiscal algébrico por SymPy: P1 (parse), P2 (derivação declarada), P3 (condição de
-validade). Os `srepr` saem do parser real da Task 8, para que o fiscal seja testado sobre exatamente o
-que a extração produz."""
+"""Tasks 9 e 10: fiscal.py — fiscal algébrico por SymPy: P1 (parse), P2 (derivação declarada), P3 (condição
+de validade); e a segunda via, P4: toda derivação e todo momento fechado exigem prova Wolfram registrada
+e concordante. Os `srepr` saem do parser real da Task 8, para que o fiscal seja testado sobre exatamente
+o que a extração produz."""
 import contextlib
 import io
 import json
@@ -16,6 +17,7 @@ sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recort
 EQ = sys.modules.setdefault("extrair_equacoes", carregar("skills/lavra/scripts/extrair_equacoes.py"))
 FI = carregar("skills/lavra/scripts/fiscal.py")
 equivalente, relacional_parseia, provas_sympy = FI.equivalente, FI.relacional_parseia, FI.provas_sympy
+provas, provas_wolfram = FI.provas, FI.provas_wolfram
 
 ONDA = "2026-10-T9"
 
@@ -172,6 +174,127 @@ class TesteProvas(unittest.TestCase):
         self.assertIn("equação desconhecida", p2[0]["detalhe"]); self.assertIn("sem srepr", p2[1]["detalhe"])
 
 
+SAIDA_ZERO = "Out[1]= 0"
+SAIDA_ERRADA = "Out[1]= ((-1 + b^2)*(-1 + p))/b"
+
+
+def wolfram_p2(mae, filha, veredito, saida=SAIDA_ZERO):
+    return {"prova": "P2", "via": "wolfram", "mae": mae, "filha": filha, "veredito": veredito, "saida": saida,
+            "codigo": "Simplify[...]"}
+
+
+def wolfram_momento(equacao, veredito, saida="Out[1]= 0"):
+    return {"prova": "momento", "via": "wolfram", "equacao": equacao, "veredito": veredito, "saida": saida,
+            "codigo": "FullSimplify[...]"}
+
+
+def indice(*linhas):
+    return {FI.chave_wolfram(l): l for l in linhas}
+
+
+class TesteP4(unittest.TestCase):
+    def cand(self, nome, latex, **extra):
+        r = EQ.parsear_latex(latex)
+        return dict({"nome": nome, "latex": latex, "srepr": r["srepr"], "simbolos": r["simbolos"],
+                     "motivo": r["motivo"]}, **extra)
+
+    def setUp(self):
+        self.eqs = [self.cand("kelly#1", MAE_KELLY), self.cand("kelly#2", FILHA_KELLY)]
+        self.ders = [{"filha": "kelly#2", "mae": "kelly#1", "alvo": "f", "substituicao": {}, "passo": "isola f"}]
+
+    def p4(self, linhas):
+        return [l for l in linhas if l["prova"] == "P4"]
+
+    def test_p4_deriva_de_sem_prova_wolfram_e_vermelho(self):
+        linhas = provas(self.eqs, self.ders, [], {})
+        self.assertEqual([l["prova"] for l in linhas], ["P1", "P1", "P2", "P4"])
+        p4 = self.p4(linhas)[0]
+        self.assertEqual((p4["veredito"], p4["alvo"], p4["mae"], p4["filha"]), ("vermelho", "kelly#2", "kelly#1", "kelly#2"))
+        self.assertIn("sem prova Wolfram", p4["detalhe"])
+        # prova de outra derivação não serve: a junção é por mãe + filha
+        p4 = self.p4(provas(self.eqs, self.ders, [], indice(wolfram_p2("kelly#9", "kelly#2", "verde"))))[0]
+        self.assertIn("sem prova Wolfram", p4["detalhe"])
+
+    def test_p4_vias_divergem_e_vermelho_com_as_duas_saidas(self):
+        linhas = provas(self.eqs, self.ders, [], indice(wolfram_p2("kelly#1", "kelly#2", "vermelho", SAIDA_ERRADA)))
+        p2 = [l for l in linhas if l["prova"] == "P2"][0]
+        p4 = self.p4(linhas)[0]
+        self.assertEqual((p2["veredito"], p4["veredito"]), ("verde", "vermelho"))
+        self.assertIn("vias divergem", p4["detalhe"])
+        self.assertIn(p2["detalhe"], p4["detalhe"])          # a saída da via SymPy
+        self.assertIn(SAIDA_ERRADA, p4["detalhe"])           # e a da via Wolfram, verbatim
+
+    def test_p4_vias_concordam_e_verde(self):
+        p4 = self.p4(provas(self.eqs, self.ders, [], indice(wolfram_p2("kelly#1", "kelly#2", "verde"))))[0]
+        self.assertEqual(p4["veredito"], "verde")
+        self.assertIn("vias concordam", p4["detalhe"]); self.assertIn(SAIDA_ZERO, p4["detalhe"])
+        self.assertEqual(sorted(p4), ["alvo", "detalhe", "filha", "mae", "ms", "prova", "veredito"])
+
+    def test_p4_sympy_indeterminado_e_wolfram_verde_divergem(self):
+        eqs = [self.cand("q#1", "y = x^{2}"), self.cand("q#2", r"x = \sqrt{y}")]
+        ders = [{"filha": "q#2", "mae": "q#1", "alvo": "x", "substituicao": {}}]
+        linhas = provas(eqs, ders, [], indice(wolfram_p2("q#1", "q#2", "verde")))
+        self.assertEqual([l["veredito"] for l in linhas if l["prova"] in ("P2", "P4")], ["indeterminado", "vermelho"])
+        self.assertIn("vias divergem", self.p4(linhas)[0]["detalhe"])
+
+    def test_p4_vias_que_concordam_no_vermelho_seguem_vermelho(self):
+        eqs = self.eqs + [self.cand("kelly#3", r"f = p - (1 - p) b")]
+        ders = [{"filha": "kelly#3", "mae": "kelly#1", "alvo": "f", "substituicao": {}}]
+        p4 = self.p4(provas(eqs, ders, [], indice(wolfram_p2("kelly#1", "kelly#3", "vermelho", SAIDA_ERRADA))))[0]
+        self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("vias concordam", p4["detalhe"])
+
+    def test_momento_pareto_exige_wolfram(self):
+        eqs = self.eqs + [self.cand("pareto#3", r"m = \frac{\alpha L}{\alpha - 1}",
+                                    momento_fechado={"media": "alpha*L/(alpha-1)"}),
+                          self.cand("pareto#4", "m = L", momento_fechado={})]          # vazio = não declarado
+        p4 = self.p4(provas(eqs, [], [], {}))
+        self.assertEqual([(l["alvo"], l["equacao"], l["veredito"]) for l in p4], [("pareto#3", "pareto#3", "vermelho")])
+        self.assertIn("sem prova Wolfram", p4[0]["detalhe"])
+        saida = "Out[1]= 0"
+        p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", "verde", saida))))
+        self.assertEqual(p4[0]["veredito"], "verde"); self.assertIn(saida, p4[0]["detalhe"])
+        self.assertEqual(sorted(p4[0]), ["alvo", "detalhe", "equacao", "ms", "prova", "veredito"])
+        for v in ("vermelho", "indeterminado"):
+            p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", v, "Out[1]= alpha"))))
+            self.assertEqual(p4[0]["veredito"], v); self.assertIn("Out[1]= alpha", p4[0]["detalhe"])
+
+    def test_p4_vem_depois_de_p1_p2_p3_e_provas_sympy_nao_muda(self):
+        eqs = self.eqs + [self.cand("pareto#3", "m = L", momento_fechado={"media": "L"})]
+        vals = [{"equacao": "kelly#2", "condicao": "b > 0"}]
+        self.assertEqual([l["prova"] for l in provas(eqs, self.ders, vals, {})], ["P1"] * 3 + ["P2", "P3", "P4", "P4"])
+        self.assertEqual([l["prova"] for l in provas_sympy(eqs, self.ders, vals)], ["P1"] * 3 + ["P2", "P3"])
+
+
+class TesteProvasWolfram(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.caminho = os.path.join(self.tmp, "provas.jsonl")
+
+    def escrever(self, linhas):
+        with io.open(self.caminho, "w", encoding="utf-8", newline="\n") as f:
+            f.writelines(json.dumps(l, sort_keys=True, ensure_ascii=False) + "\n" for l in linhas)
+
+    def test_le_e_indexa_por_chave(self):
+        self.escrever([wolfram_p2("a#1", "a#2", "verde"), wolfram_momento("p#3", "vermelho")])
+        d = provas_wolfram(self.caminho)
+        self.assertEqual(sorted(d), [("P2", "a#1", "a#2"), ("momento", "p#3")])
+        self.assertEqual(d[("momento", "p#3")]["veredito"], "vermelho")
+
+    def test_arquivo_ausente_e_nenhuma_prova(self):
+        self.assertEqual(provas_wolfram(os.path.join(self.tmp, "nao-existe.jsonl")), {})
+
+    def test_duplicata_ou_linha_malformada_falha_alto(self):
+        for linhas in ([wolfram_p2("a#1", "a#2", "verde"), wolfram_p2("a#1", "a#2", "vermelho")],
+                       [dict(wolfram_p2("a#1", "a#2", "verde"), via="sympy")],
+                       [dict(wolfram_p2("a#1", "a#2", "verde"), prova="P5")],
+                       [dict(wolfram_momento("p#3", "verde"), veredito="talvez")],
+                       [{"prova": "P2", "via": "wolfram", "mae": "a#1", "veredito": "verde", "saida": "0"}]):
+            self.escrever(linhas)
+            with self.assertRaises(ValueError, msg=linhas):
+                provas_wolfram(self.caminho)
+
+
 class TesteCli(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -204,7 +327,7 @@ class TesteCli(unittest.TestCase):
         texto = self.ler("rel.md")
         self.assertIn("| prova | alvo | veredito | detalhe | ms |", texto)
         self.assertIn(r"\|", texto)      # o `|` do LaTeX não quebra a tabela
-        self.assertEqual(len([l for l in texto.splitlines() if l.startswith("| P")]), 4)
+        self.assertEqual(len([l for l in texto.splitlines() if l.startswith("| P")]), 5)   # P1×3, P2, P4
 
     def test_jsonl_sem_ms_ordenado_e_deterministico(self):
         self.preparar()
@@ -213,8 +336,9 @@ class TesteCli(unittest.TestCase):
         linhas = [json.loads(l) for l in primeiro.splitlines()]
         self.assertEqual([sorted(l) for l in linhas],
                          [["alvo", "detalhe", "equacao", "prova", "veredito"]] * 3
-                         + [["alvo", "detalhe", "filha", "mae", "prova", "simbolo", "substituicao", "veredito"]])
-        self.assertEqual([l["veredito"] for l in linhas], ["verde", "verde", "vermelho", "verde"])
+                         + [["alvo", "detalhe", "filha", "mae", "prova", "simbolo", "substituicao", "veredito"]]
+                         + [["alvo", "detalhe", "filha", "mae", "prova", "veredito"]])
+        self.assertEqual([l["veredito"] for l in linhas], ["verde", "verde", "vermelho", "verde", "vermelho"])
         for l in primeiro.splitlines():
             self.assertEqual(l, json.dumps(json.loads(l), sort_keys=True, ensure_ascii=False))
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "fiscal-%s.md" % ONDA)))   # relatório no padrão
@@ -225,11 +349,32 @@ class TesteCli(unittest.TestCase):
         self.assertEqual(self.rodar(), 0)
         self.assertEqual([json.loads(l)["prova"] for l in self.ler("fiscal-%s.jsonl" % ONDA).splitlines()], ["P1"])
 
-    def test_sem_equacoes_falha_alto_e_wolfram_aceito(self):
+    def test_sem_equacoes_falha_alto(self):
         with self.assertRaises(SystemExit):
             self.rodar()
+
+    def p4_do_jsonl(self):
+        return [json.loads(l) for l in self.ler("fiscal-%s.jsonl" % ONDA).splitlines() if '"P4"' in l]
+
+    def test_provas_wolfram_no_caminho_padrao_e_no_declarado(self):
         self.preparar()
-        self.assertEqual(self.rodar("--provas-wolfram", os.path.join(self.tmp, "nao-existe.jsonl")), 0)
+        self.rodar("--provas-wolfram", os.path.join(self.tmp, "nao-existe.jsonl"))
+        self.assertIn("sem prova Wolfram", self.p4_do_jsonl()[0]["detalhe"])
+        self.escrever("provas", [wolfram_p2("r#1", "r#2", "verde")])          # <raiz>/provas-<onda>.jsonl
+        self.rodar()
+        self.assertEqual(self.p4_do_jsonl()[0]["veredito"], "verde")
+        outro = os.path.join(self.tmp, "outro.jsonl")
+        with io.open(outro, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(wolfram_p2("r#1", "r#2", "vermelho", SAIDA_ERRADA), sort_keys=True) + "\n")
+        self.rodar("--provas-wolfram", outro)
+        p4 = self.p4_do_jsonl()[0]
+        self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("vias divergem", p4["detalhe"])
+
+    def test_provas_wolfram_malformadas_falham_alto(self):
+        self.preparar()
+        self.escrever("provas", [wolfram_p2("r#1", "r#2", "verde")] * 2)
+        with self.assertRaises(SystemExit):
+            self.rodar()
 
     def test_onda_invalida_e_recusada(self):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
