@@ -23,6 +23,7 @@ NUC = sys.modules.setdefault("nucleo", carregar("skills/lavra/scripts/nucleo.py"
 EQ = sys.modules.setdefault("extrair_equacoes", carregar("skills/lavra/scripts/extrair_equacoes.py"))
 FI = sys.modules.setdefault("fiscal", carregar("skills/lavra/scripts/fiscal.py"))
 AO = carregar("skills/lavra/scripts/aprovar_onda.py")
+RP = carregar("skills/lavra/scripts/registrar_prova.py")
 
 ONDA = "2026-10-T11"
 DOC = "Kelly.pdf.md"
@@ -548,6 +549,91 @@ class TesteAplicarMomentos(BaseOnda):
                     {"tipo": "momento_fechado", "equacao": "a", "momento_fechado": {"media": ""}}):
             with self.assertRaises(ValueError, msg=dec):
                 AO.aplicar_momentos(eqs, [dec])
+
+
+class TesteFimAFim(unittest.TestCase):
+    """Extração real → fiscal → registrar_prova → fiscal → gate, sem banco: a média da Pareto só sai aprovada
+    com o momento declarado e provado na via Wolfram; a derivação de Kelly, com as duas vias verdes."""
+    ONDA_E2E = "2026-10-E2E"
+    DOC_MD = ("## Pareto\n\n$$\\mathbb{E}[X] = \\frac{\\alpha L}{\\alpha - 1}$$\n\n"
+              "## Kelly\n\n$$\\frac{p b}{1 + b f} - \\frac{1 - p}{1 - f} = 0$$\n\n$$f = p - \\frac{1 - p}{b}$$\n")
+    # gabaritos de references/fiscal.md, verbatim
+    CODIGO_MEDIA = ("FullSimplify[Expectation[x, x \\[Distributed] ParetoDistribution[L, alpha], Assumptions -> "
+                    "alpha > 1 && L > 0] - (alpha L/(alpha - 1)), Assumptions -> alpha > 1 && L > 0]\n")
+    SAIDA_MEDIA = ("Symbol::undefined2: Warning: Global symbols \"L, L, L, L\" are undefined.\n"
+                   "General::messages: Messages were generated which may indicate errors.\n\nOut[1]= 0\n")
+    CODIGO_KELLY = "Simplify[(p - (1 - p)/b) - (f /. First@Solve[p b/(1 + b f) - (1 - p)/(1 - f) == 0, f])]\n"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.esteira = os.path.join(self.tmp, "_esteira", "incerto")
+        conf = os.path.join(self.tmp, "conferidos", self.ONDA_E2E)
+        os.makedirs(conf)
+        with io.open(os.path.join(conf, "Taleb.pdf.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(self.DOC_MD)
+
+    def arq(self, prefixo):
+        return os.path.join(self.esteira, "%s-%s.jsonl" % (prefixo, self.ONDA_E2E))
+
+    def texto(self, nome, conteudo):
+        caminho = os.path.join(self.tmp, nome)
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(conteudo)
+        return caminho
+
+    def cli(self, modulo, *args):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return modulo.main(list(args))
+
+    def fiscal(self):
+        self.assertEqual(self.cli(FI, "--onda", self.ONDA_E2E, "--raiz-esteira", self.esteira), 0)
+
+    def registrar(self, *args):
+        self.assertEqual(self.cli(RP, "--onda", self.ONDA_E2E, "--raiz-esteira", self.esteira, *args), 0)
+
+    def plano(self):
+        dados = AO.carregar_onda(self.esteira, self.ONDA_E2E, AO.CORPUS)
+        AO.conferir_fiscal_atual(dados)                    # o fiscal gravado é o desta onda, agora
+        return AO.decidir(dados["equacoes"], dados["derivacoes"], dados["validades"], dados["fiscal"],
+                          dados["decisoes"])
+
+    def test_pareto_e_kelly_da_extracao_ao_gate(self):
+        self.assertEqual(self.cli(EQ, "--raiz", self.tmp, "--onda", self.ONDA_E2E, "--saida", self.arq("equacoes")), 0)
+        media, mae, filha = "Taleb.pdf.md#1", "Taleb.pdf.md#2", "Taleb.pdf.md#3"
+        escrever_jsonl(self.arq("derivacoes"), [deriv(mae, filha, "f")])
+
+        # 1. sem momento_fechado: a média só tem P1 verde, mas aplica E — não pode sair aprovada
+        self.fiscal()
+        self.registrar("--prova", "P2", "--mae", mae, "--filha", filha, "--codigo", self.texto("k.wl", self.CODIGO_KELLY),
+                       "--saida", self.texto("k.txt", "Out[1]= 0\n"), "--veredito", "verde")
+        self.fiscal()
+        plano = self.plano()
+        eqs = {e["nome"]: e for e in plano["equacoes"]}
+        self.assertEqual(eqs[media]["status"], "staging")
+        self.assertIn("aplica E/Var sem momento_fechado declarado", " ".join(eqs[media]["pendencias"]))
+        d = plano["deriva_de"][0]
+        self.assertEqual((d["filha"], d["mae"], d["status"], d["verificado_por"], d["aceites_po"]),
+                         (filha, mae, "aprovado", ["sympy@1.14.0", "wolfram"], []))
+
+        # 2. o PO declara o momento: aplicado ao candidato, a P4 exige a prova Wolfram dele
+        escrever_jsonl(self.arq("decisoes"), [{"tipo": "momento_fechado", "equacao": media,
+                                               "momento_fechado": {"media": "alpha*L/(alpha - 1)"}}])
+        self.assertEqual(self.cli(AO, "--onda", self.ONDA_E2E, "--raiz-esteira", self.esteira, "--aplicar-momentos"), 0)
+        self.fiscal()
+        self.assertEqual({e["nome"]: e["status"] for e in self.plano()["equacoes"]}[media], "staging")
+        # verde com a saída que não é zero é recusado pelo registrador
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.registrar("--prova", "momento", "--equacao", media, "--codigo", self.texto("m.wl", self.CODIGO_MEDIA),
+                           "--saida", self.texto("m.txt", "Out[1]= (alpha*L)/(-1 + alpha)\n"), "--veredito", "verde")
+        self.registrar("--prova", "momento", "--equacao", media, "--codigo", self.texto("m.wl", self.CODIGO_MEDIA),
+                       "--saida", self.texto("m.txt", self.SAIDA_MEDIA), "--veredito", "verde")
+        self.fiscal()
+        plano = self.plano()
+        eqs = {e["nome"]: e for e in plano["equacoes"]}
+        self.assertEqual((eqs[media]["status"], eqs[media]["pendencias"]), ("aprovado", []))
+        self.assertEqual(json.loads(eqs[media]["momento_fechado"]), {"media": "alpha*L/(alpha - 1)"})
+        self.assertEqual(plano["deriva_de"][0]["status"], "aprovado")
 
 
 @precisa_neo4j
