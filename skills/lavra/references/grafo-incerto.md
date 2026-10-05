@@ -33,7 +33,7 @@ pelo portão do PO dos `conferidos/`, não pelo fiscal. `:Documento` é criado p
 
 | Rótulo | Chave do `MERGE` | Propriedades | Escritor |
 |---|---|---|---|
-| `:Documento` | `{corpus, nome}` | `status`, `fonte` (`{"documento": nome, "topico": null}`) | ingestão (chave); aprovação (`status`, `fonte`) |
+| `:Documento` | `{corpus, nome}` | `status` (sempre `'aprovado'`), `fonte` (`{"documento": nome, "topico": null}`) | ingestão (chave); aprovação (`status`, `fonte`) |
 | `:Trecho` | `{corpus, documento, topico, parte}` | `texto` (verbatim), `onda`, `ordem`, `embedding_gemini`, `junta`, `cabecalho` | ingestão |
 | `:Equacao` | `{corpus, nome}` | `latex`, `sympy_srepr`, `forma` (`algebrica`\|`funcional`\|`perda`), `momento_fechado` (JSON ou ausente), `hipoteses`, `faixa_validade` (lista das condições declaradas em `validades-`), `onda`, `ordem`, `status`, `fonte`, `pendencias`, `aceites_po`, `rotulo` (decisão `rotular_equacao`; único no corpus; ausente sem decisão) | aprovação |
 | `:Variavel` | `{corpus, nome}` | `simbolo`, `tipo` (`variavel`\|`parametro`\|`constante`), `status`, `fonte` | aprovação |
@@ -50,6 +50,9 @@ pelo portão do PO dos `conferidos/`, não pelo fiscal. `:Documento` é criado p
   aprovação: `'aprovado'` se alguma `:Equacao` aprovada a `USA` por aresta aprovada, em qualquer onda.
   Variável que nenhuma equação usa mais (renomeada) é apagada.
 - `:Conceito` e `:Heuristica` vêm de decisão do PO, que é a autoridade: entram `'aprovado'`.
+- `:Documento` é **sempre** `'aprovado'`: só existe documento de `conferidos/<onda>/`, que já passou pelo
+  portão do PO (`conferir_onda.py --aprovar`); o gate do fiscal é sobre equações e arestas, não sobre ele.
+  Equação em staging não rebaixa o documento que a cita.
 
 ## Relações
 
@@ -204,11 +207,12 @@ ON CREATE SET v.simbolo = l.simbolo, v.fonte = l.fonte, v.status = l.status
 UNWIND $linhas AS l
 MERGE (c:Conceito {corpus: $corpus, nome: l.nome})
 SET c.tipo = l.tipo, c.definicao = l.definicao, c.sinonimos = l.sinonimos, c.onda = $onda, c.status = l.status,
-    c.fonte = l.fonte
+    c.fonte = l.fonte, c.pendencias = []          // limpa a pendência de um rebaixamento anterior
 
 UNWIND $linhas AS l
 MERGE (h:Heuristica {corpus: $corpus, nome: l.nome})
-SET h.enunciado = l.enunciado, h.condicao = l.condicao, h.onda = $onda, h.status = l.status, h.fonte = l.fonte
+SET h.enunciado = l.enunciado, h.condicao = l.condicao, h.onda = $onda, h.status = l.status, h.fonte = l.fonte,
+    h.pendencias = []
 ```
 
 Arestas:

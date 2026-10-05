@@ -555,13 +555,14 @@ CYPHER_CONCEITOS = """
 UNWIND $linhas AS l
 MERGE (c:Conceito {corpus: $corpus, nome: l.nome})
 SET c.tipo = l.tipo, c.definicao = l.definicao, c.sinonimos = l.sinonimos, c.onda = $onda, c.status = l.status,
-    c.fonte = l.fonte
+    c.fonte = l.fonte, c.pendencias = []
 """
 
 CYPHER_HEURISTICAS = """
 UNWIND $linhas AS l
 MERGE (h:Heuristica {corpus: $corpus, nome: l.nome})
-SET h.enunciado = l.enunciado, h.condicao = l.condicao, h.onda = $onda, h.status = l.status, h.fonte = l.fonte
+SET h.enunciado = l.enunciado, h.condicao = l.condicao, h.onda = $onda, h.status = l.status, h.fonte = l.fonte,
+    h.pendencias = []
 """
 
 CYPHER_SUSTENTA_CONCEITO = """

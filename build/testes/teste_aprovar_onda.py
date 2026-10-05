@@ -501,6 +501,20 @@ class TesteRebaixar(unittest.TestCase):
         self.assertEqual(AO.a_rebaixar([("Equacao", "a"), ("Conceito", "ruina")], plano), [])
 
 
+class TesteCypher(unittest.TestCase):
+    def test_conceito_e_heuristica_promovidos_limpam_a_pendencia_do_rebaixamento(self):
+        # M3: rebaixado ("fora da rodada atual") e depois decidido de novo voltava `aprovado` com a pendência velha
+        for cypher, var in ((AO.CYPHER_CONCEITOS, "c"), (AO.CYPHER_HEURISTICAS, "h")):
+            self.assertIn("%s.pendencias = []" % var, cypher)
+
+    def test_documento_e_sempre_aprovado(self):
+        dec = [{"tipo": "conceito", "nome": "ruina", "tipo_conceito": "fenomeno", "definicao": "d", "sinonimos": [],
+                "fonte": {"documento": "Outro.pdf.md", "topico": "T"}}]
+        plano = AO.decidir([eq_fixa("a")], [], [], [p1("a", "vermelho")], dec)
+        self.assertEqual({d["status"] for d in plano["documentos"]}, {"aprovado"})
+        self.assertEqual(plano["equacoes"][0]["status"], "staging")
+
+
 class TesteGravarJsonl(unittest.TestCase):
     def test_falha_nao_deixa_temporario(self):
         tmp = tempfile.mkdtemp()
@@ -644,6 +658,12 @@ class TesteBancoReal(BaseOnda):
         self.executar()
         for rotulo, nome in (("Equacao", "Ramo.pdf.md#1"), ("Equacao", "Ramo.pdf.md#2"), ("Conceito", "ruina")):
             self.assertEqual(self.q(st % (rotulo, nome)), [["staging", ["fora da rodada atual"]]], nome)
+        # decidido de novo, volta aprovado sem a pendência do rebaixamento
+        self.onda.decisoes = [{"tipo": "conceito", "nome": "ruina", "tipo_conceito": "fenomeno", "definicao": "d",
+                               "sinonimos": [], "fonte": {"documento": DOC, "topico": "T"}}]
+        self.onda.gravar()
+        self.executar()
+        self.assertEqual(self.q(st % ("Conceito", "ruina")), [["aprovado", []]])
         self.assertEqual(self.q(st % ("Equacao", "Kelly.pdf.md#2"))[0][0], "aprovado")
         self.assertEqual(self.q("MATCH (:Equacao {corpus: $c, nome: 'Ramo.pdf.md#2'})-[r]->() RETURN count(r)"), [[0]])
 
