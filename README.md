@@ -25,6 +25,7 @@ e caudas gordas. O veredito do especialista nunca é recomendação de ativo.
 | `skills/taleb/SKILL.md` | estação `taleb`: rito em cinco passos (exposição, corpus pelo MCP, dados BR, diagnósticos, Wolfram antes de afirmar conta fechada) e veredito marcado que nunca recomenda ativo |
 | `skills/taleb/references/doutrina.md` | um verbete por conceito de Taleb, cada um com `fonte:` (`[externo]` até a onda 1 ser conferida) |
 | `skills/taleb/references/heuristicas.md` | regras práticas com `condicao:` parseável pelo fiscal sobre `kappa`, `alpha`, `H`, `fracao_segura` |
+| `evals/` | três casos de `claude plugin eval` (especialista não cita staging como corpus, Wolfram antes de conta fechada, fiscal de duas vias); corrida manual por `.github/workflows/evals.yml` |
 | `build/testes/` | testes; `_carga.py` carrega módulos por caminho relativo à raiz |
 | `dados/` | cache dos dados BR (conteúdo fora do git) |
 | `docs/superpowers/` | spec e plano |

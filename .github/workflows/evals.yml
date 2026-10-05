@@ -1,0 +1,39 @@
+# Evals do Incerto (claude plugin eval). CUSTA DINHEIRO: cada corrida chama o modelo várias vezes
+# (casos x runs x juiz). Por isso é MANUAL DE PROPÓSITO: só workflow_dispatch, nunca push nem PR.
+# Exige o secret ANTHROPIC_API_KEY no repositório.
+name: evals
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: claude plugin eval sobre evals/
+        run: |
+          claude plugin eval . --allow-tools Skill,Read,Write,Glob,Grep,mcp__Wolfram__WolframLanguageEvaluator \
+            --threshold 0.8 --runs 3 --ablation none --json results.json --report report.html
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: evals-resultados
+          path: |
+            results.json
+            report.html
