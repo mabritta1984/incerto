@@ -253,6 +253,72 @@ class TesteParse(unittest.TestCase):
         self.assertEqual(a, parsear_latex(r"\frac{p b}{1 + b f} - \frac{1 - p}{1 - f} = 0"))
 
 
+class TesteConstantes(unittest.TestCase):
+    """Rodada de 05/10 (onda 2026-10-TALEB-1): `\\pi` é a constante π; `e` base de potência é o número de
+    Euler; o subscrito entre parênteses (estatística de ordem) é perda antes do parse."""
+
+    def test_pi_e_a_constante(self):
+        r = parsear_latex(r"P_H(t) = (h/\sqrt{2\pi t^3})\exp(-h^2/2t)", frozenset({"P_H"}))   # DH#276
+        self.assertTrue(r["ok"], r["motivo"]); self.assertEqual(r["simbolos"], ["h", "t"])
+        self.assertNotIn("Symbol('pi')", r["srepr"]); self.assertIn("pi", r["srepr"])
+        self.assertEqual(parsear_latex(r"y = \pi x")["srepr"], "Equality(Symbol('y'), Mul(pi, Symbol('x')))")
+
+    def test_pi_com_subscrito_segue_simbolo(self):
+        r = parsear_latex(r"\pi_{A} = x")
+        self.assertTrue(r["ok"]); self.assertEqual(r["simbolos"], ["pi_A", "x"])
+
+    def test_e_base_de_potencia_e_euler(self):
+        casos = {r"y = e^{x}": "Equality(Symbol('y'), exp(Symbol('x')))",
+                 r"y = e^x": "Equality(Symbol('y'), exp(Symbol('x')))",
+                 r"y = e^{2}": "Equality(Symbol('y'), exp(Integer(2)))",
+                 r"y = n e^{-n}": "Equality(Symbol('y'), Mul(Symbol('n'), exp(Mul(Integer(-1), Symbol('n')))))",
+                 r"y = ne^{-n}": "Equality(Symbol('y'), Mul(Symbol('n'), exp(Mul(Integer(-1), Symbol('n')))))",
+                 r"y \le e^{x}": "LessThan(Symbol('y'), exp(Symbol('x')))"}
+        for latex, srepr in casos.items():
+            r = parsear_latex(latex)
+            self.assertTrue(r["ok"], (latex, r["motivo"])); self.assertEqual(r["srepr"], srepr, latex)
+            self.assertNotIn("e", r["simbolos"], latex)
+        r = parsear_latex(r"\varphi(\omega) = (1 + \sqrt{3}|\omega|)^n e^{-n\sqrt{3}|\omega|}",   # SCFT#183
+                          frozenset({"varphi"}))
+        self.assertTrue(r["ok"], r["motivo"]); self.assertNotIn("Symbol('e')", r["srepr"])
+        self.assertIn("exp(", r["srepr"]); self.assertEqual(r["simbolos"], ["n", "omega"])
+
+    def test_e_solto_segue_simbolo(self):
+        r = parsear_latex(r"y = e x")
+        self.assertTrue(r["ok"]); self.assertEqual(r["simbolos"], ["e", "x", "y"])
+        self.assertEqual(normalizar_latex(r"y = e^{x}"), r"y = e^{x}")
+
+    def test_constante_lida_como_simbolo_base_de_potencia_e_perda(self):
+        # defesa em profundidade: `Symbol('pi')`, ou `Symbol('e')` base de `Pow`, nunca sai num srepr ok
+        casos = {r"y = \frac{x}{e}": "nao_suportado:constante_como_simbolo:e",       # Pow(e, -1): e solto?
+                 r"y = \sqrt{e}": "nao_suportado:constante_como_simbolo:e",
+                 r"y = \mathit{e}^{x}": "nao_suportado:constante_como_simbolo:e",
+                 r"\mathit{pi} = x": "nao_suportado:constante_como_simbolo:pi"}
+        for latex, motivo in casos.items():
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertIsNone(r["srepr"], latex)
+            self.assertEqual(r["motivo"], motivo, latex)
+
+    def test_pi_sozinho_num_lado_da_relacao_e_variavel_e_perda(self):
+        # decisão de 05/10 (opção A): SCFT#528 (eq. 20.1) e #546 — π é a carteira replicante; ler a constante
+        # diria "π = -C + S ∂C/∂S", parse errado em silêncio
+        for latex in (r"\pi = -C + \frac{\partial C}{\partial S}S \tag{20.1}", r"x = \pi", r"\pi \le x + 1"):
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertIsNone(r["srepr"], latex)
+            self.assertEqual(r["motivo"], "nao_suportado:\\pi_como_variavel", latex)
+        for latex in (r"y = \pi x", r"y = 2\pi", r"\pi x = y"):
+            self.assertTrue(parsear_latex(latex)["ok"], latex)
+
+    def test_estatistica_de_ordem_e_perda_antes_do_parse(self):
+        scft_363 = (r"\frac{n^{\frac{\alpha-1}{\alpha}}}{L_0(n)} \left( \frac{1}{n} \sum_{i=1}^n Z_{(i)} - \theta "
+                    r"\right) = \frac{n^{\frac{\alpha-1}{\alpha}}}{L_0(n)} \left( \frac{1}{n} \sum_{i=1}^n Z_i - "
+                    r"\theta \right) + \frac{n^{\frac{\alpha-1}{\alpha}}}{L_0(n)} R_n. \tag{13.34}")
+        for latex in (scft_363, r"X_{(1)} = \min(x, y)", r"y = X_{ ( n ) }"):
+            r = parsear_latex(latex, frozenset({"L_0"}))
+            self.assertFalse(r["ok"], latex); self.assertEqual(r["motivo"], "nao_suportado:_{(", latex)
+        self.assertTrue(parsear_latex(r"y = X_{n}")["ok"])
+
+
 # Convex_Responses.pdf, eq. (1), como o mineiro a converteu
 CONVEX_1 = r"F(x, \lambda) = \frac{f(x + \lambda) + f(x - \lambda)}{2} - f(x) \tag{1}"
 

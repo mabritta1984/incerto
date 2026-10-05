@@ -121,11 +121,19 @@ mecânica e **preserva os nomes**:
 | `Pow(x, Rational(1, 2))` | `x^(1/2)` (ou `Sqrt[x]`) |
 | `log(x)`, `log(x, E)` | `Log[x]` (logaritmo natural nos dois casos) |
 | `exp(x)` | `Exp[x]` |
+| `pi`, `E` (as constantes do SymPy, sem `Symbol(…)`) | `Pi`, `E` |
 | `Abs(x)` | `Abs[x]` |
 
-- **`pi` e `e` são símbolos comuns no corpus** (decisão vigente até o PO decidir): o código usa `pi` e `e`
-  minúsculos, nunca `Pi` nem `E`. Trocar pela constante numa via só cria divergência que não existe na
-  outra — e esconde a pendência de decisão.
+- **`\pi` é π e `e` base de potência é o número de Euler** (rodada de extração de 05/10, decidida pelo corpus
+  e pelo Wolfram na onda 2026-10-TALEB-1): a extração grava `pi` e `exp(…)`/`E` no `srepr`, e o código usa
+  `Pi`, `Exp[…]`/`E`. `e` solto (não base de potência) segue `Symbol('e')` → `e` minúsculo, símbolo comum;
+  `Symbol('pi')` não sai mais num candidato que parseia; `\pi` sozinho num lado da relação (`\pi = …`, a
+  carteira do SCFT eq. 20.1) é variável e a extração o dá como perda `nao_suportado:\pi_como_variavel`.
+  Nunca trocar símbolo por constante (ou o inverso) numa via só: o código segue o `srepr`.
+- **Reextração depois dessa rodada**: todo candidato cujo `srepr` mudou (os que tinham `Symbol('pi')` ou
+  `Symbol('e')` base de potência, e o SCFT#363, agora perda `nao_suportado:_{(`) tem a prova Wolfram
+  **desatualizada** na P4 — é o correto. A prova não é editada: refaz-se o código a partir do `srepr` novo
+  e registra-se com `registrar_prova.py … --substituir`.
 - `lambda` fica `lambda` (no Wolfram é um nome livre).
 - Nome que no Wolfram é embutido (`C`, `D`, `E`, `I`, `K`, `N`, `O`, `Re`, `Im`, `Gamma`, `Beta`, …) ou que tem
   `_` (no Wolfram `_` é padrão: `x_i` não é símbolo) é renomeado de forma injetiva — prefixo `s` para o
@@ -195,7 +203,10 @@ parâmetro no domínio da fonte:
 direito vem do `srepr` do candidato. A equação vermelha não é corrigida aqui: a saída vai ao PO no bloco de
 decisão (a extração ou o texto da fonte pode estar errado; quem decide é ele).
 
-## Falso vermelho conhecido: `e^x` contra `\log`
+## Falso vermelho conhecido: `e^x` contra `\log` (histórico — resolvido na extração em 05/10)
+
+Desde a rodada de 05/10, `e^{x}` é extraído como `exp(x)` e a mãe `y = e^{x}` dá `x = log(y)` nas duas vias:
+o caso abaixo deixou de existir para candidatos reextraídos. Fica o registro de por que a regra mudou.
 
 Com `e` símbolo comum, a mãe `y = e^{x}` dá `x = log(y)/log(e)` nas duas vias; a filha `x = \log y` (log
 natural, `log(y, E)` no `srepr`) não bate: o SymPy dá vermelho ("a mãe dá x = log(y)/log(e); a filha diz
@@ -285,7 +296,7 @@ Out[1]= 0
 Veredito: **verde** (saída `0`; o aviso sobre `L` aparece mesmo com `L > 0` nas `Assumptions` e é
 inofensivo).
 
-### `e^x` contra `\log` com `e` símbolo comum — falso vermelho conhecido (05/10/2026)
+### `e^x` contra `\log` com `e` símbolo comum — falso vermelho conhecido (05/10/2026; histórico)
 
 Mãe `y = e^{x}`, filha `x = \log y`, símbolo `x`.
 

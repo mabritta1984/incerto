@@ -75,10 +75,13 @@ class TesteEquivalente(unittest.TestCase):
         self.assertEqual(equivalente(mae, filha, "S", {})["veredito"], "vermelho")
         self.assertEqual(equivalente(mae, filha, "S", {"M": "k*S**2"})["veredito"], "verde")
 
-    def test_p2_pi_e_e_seguem_simbolos(self):
+    def test_p2_pi_e_e_sao_as_constantes(self):
+        # rodada de 05/10: `\pi` é π e `e` base de potência é o número de Euler — o antigo falso vermelho
+        # conhecido (`y = e^{x}` contra `x = \log y`, com `e` símbolo comum) agora é verde
         self.assertEqual(equivalente(srepr_de(r"y = \pi x"), srepr_de(r"x = \frac{y}{\pi}"), "x", {})["veredito"], "verde")
-        self.assertEqual(equivalente(srepr_de(r"y = \pi x"), srepr_de(r"x = \frac{y}{e}"), "x", {})["veredito"],
+        self.assertEqual(equivalente(srepr_de(r"y = \pi x"), srepr_de(r"x = y e^{-1}"), "x", {})["veredito"],
                          "vermelho")
+        self.assertEqual(equivalente(srepr_de(r"y = e^{x}"), srepr_de(r"x = \log y"), "x", {})["veredito"], "verde")
 
     def test_p2_filha_que_escolhe_um_ramo_e_indeterminado(self):
         mae = srepr_de("y = x^{2}")

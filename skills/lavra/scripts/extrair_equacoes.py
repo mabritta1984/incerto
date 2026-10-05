@@ -20,8 +20,16 @@ documentos e são pulados.
      seguida de `[` e decorações (`\\overline`, `\\hat`, …); e, porque o SymPy os lê errado com `ok`,
      símbolo com subscrito seguido de `^` (`C_n^k` → Pow(C_n, k): `_{…}^`; não os limites de `\\sum`,
      `\\prod`, `\\int`, `\\lim`, …), chaves de conjunto `\\{…\\}` (e
-     `\\left\\{…\\right\\}`, lidas como `x`), `^{(…)}` (lido como potência) e `\\Delta` seguido de letra
+     `\\left\\{…\\right\\}`, lidas como `x`), `^{(…)}` (lido como potência), `_{(…)}` (estatística de ordem,
+     `Z_{(i)}` lido como `Z_i`, outro símbolo: SCFT#363 dava R_n = 0) e `\\Delta` seguido de letra
      (`\\Delta x` lido como `Delta·x`);
+  2b. constantes (rodada de 05/10, onda 2026-10-TALEB-1): `\\pi` é a constante `pi` do SymPy, nunca símbolo
+     (`\\pi_A` segue o símbolo `pi_A`; `\\pi` sozinho num lado da relação, `\\pi = …`, é variável — SCFT eq.
+     20.1, a carteira — e perda `nao_suportado:\\pi_como_variavel`); `e` base de potência (`e^{…}`, `e^x`)
+     é o número de Euler (`exp(…)`);
+     `e` solto segue símbolo — a estação não tem como decidir. Rede de segurança: `Symbol('pi')` (de
+     `\\mathit{pi}`) ou `Symbol('e')` base de `Pow` (`\\frac{x}{e}`, `\\sqrt{e}`, `\\mathit{e}^{x}`) no resultado é
+     perda `nao_suportado:constante_como_simbolo:<pi|e>`;
   3. `sympy.parsing.latex.parse_latex(..., strict=True)`; erro é perda `strict`;
   4. conferência: todo símbolo e toda função do resultado têm de ser um token inteiro do LaTeX
      normalizado (`TC` lido como `T·C` é `simbolo_partido:TC`); símbolo com nome de comando LaTeX
@@ -85,6 +93,8 @@ NAO_SUPORTADOS = (
     # `x^{(n)}` (potência ascendente, n-ésima derivada) vira `x**n`; `\Delta x` (incremento) vira `Delta*x`
     r"\\\{",
     r"\^\s*\{\s*\(",
+    # `Z_{(i)}` (estatística de ordem) vira `Z_i`, outro símbolo: SCFT#363 (eq. 13.34) dava R_n = 0
+    r"_\s*\{\s*\(",
     r"\\Delta(?=\s*(?:[A-Za-z]|\\(?:%s)(?![A-Za-z])))" % "|".join(GREGAS),
 )
 # símbolo com subscrito seguido de `^` (`C_n^k`, binomial; `x_{i}^{2}`): o SymPy lê Pow(C_n, k) — perda;
@@ -110,6 +120,9 @@ _SEM_LEITURA = (
     (r"\\(?:,|;|:|!|quad(?![A-Za-z])|qquad(?![A-Za-z]))", " "),
     (r"~", " "),
 )
+# `e` base de potência (`e^{x}`, `e^x`) é o número de Euler; os comandos (`\\le`, `\\varepsilon`) e o subscrito
+# (`x_e`) não são o `e`: o padrão os consome sem marcar
+_E_BASE = re.compile(r"\\[A-Za-z]+|_\s*[A-Za-z0-9]|(e)(?=\s*\^)")
 _MARCA = "\ue000%d\ue001"
 _RE_MARCA = re.compile("\ue000(\\d+)\ue001")
 
@@ -175,7 +188,8 @@ def _relacoes_no_nivel_zero(t):
 
 
 def _preparar(latex):
-    """Devolve (texto com marcas, [(tipo, nome canônico)], motivo). Tipo `simbolo` (composto) ou `funcao`."""
+    """Devolve (texto com marcas, [(tipo, nome canônico)], motivo). Tipo `simbolo` (composto), `funcao` ou
+    `constante` (o `e` base de potência)."""
     for padrao in NAO_SUPORTADOS:
         m = re.search(padrao, latex)
         if m:
@@ -228,6 +242,7 @@ def _preparar(latex):
         return None, [], "nao_suportado:%s" % m.group(0)
     if _relacoes_no_nivel_zero(t) > 1:
         return None, [], "nao_suportado:relacao_encadeada"
+    t = _E_BASE.sub(lambda m: marca("constante", "e") if m.group(1) else m.group(0), t)
     return t, marcas, None
 
 
@@ -239,6 +254,8 @@ def normalizar_latex(latex):
         return latex
     def escrita(m):
         tipo, nome = marcas[int(m.group(1))]
+        if tipo == "constante":
+            return nome
         return "\\mathit{%s}" % nome if tipo == "simbolo" else nome if len(nome) == 1 else "\\operatorname{%s}" % nome
     return _RE_MARCA.sub(escrita, t)
 
@@ -248,7 +265,7 @@ def _tokens(t, marcas):
     s = _RE_MARCA.sub(" ", t)
     s = re.sub(_GREGA, lambda m: " " + m.group(0)[1:], s)
     s = re.sub(r"\\(?:[A-Za-z]+|.)", " ", s)
-    return set(re.findall(r"[A-Za-z]+(?:_[A-Za-z0-9])?", s)) | {nome for _, nome in marcas}
+    return set(re.findall(r"[A-Za-z]+(?:_[A-Za-z0-9])?", s)) | {nome for tipo, nome in marcas if tipo != "constante"}
 
 
 def _livres(texto, proibidas):
@@ -307,7 +324,7 @@ def _parsear_ou_perda(latex, funcoes):
 
 
 def _parsear(latex, funcoes):
-    from sympy import Expr, Function, Max, Min, Symbol, srepr
+    from sympy import E, Expr, Function, Max, Min, Pow, Symbol, pi, srepr
     from sympy.core.function import AppliedUndef
     from sympy.core.relational import Relational
     from sympy.parsing.latex import parse_latex
@@ -317,14 +334,17 @@ def _parsear(latex, funcoes):
         return _perda(motivo)
     prefixo = _livres(t, "".join(nome for _, nome in marcas))
     funcoes_livres = [c for c in "QZWKJUV" if c not in t]
-    para_parse, simbolos_de, funcoes_de = [], {}, {}
+    para_parse, simbolos_de, funcoes_de, constantes = [], {}, {}, set()
     pos = 0
     for m in _RE_MARCA.finditer(t):
         tipo, nome = marcas[int(m.group(1))]
         para_parse.append(t[pos:m.start()])
-        if tipo == "simbolo":
+        if tipo in ("simbolo", "constante"):
             ph = prefixo + _letras(int(m.group(1)))
-            simbolos_de[ph] = nome
+            if tipo == "simbolo":
+                simbolos_de[ph] = nome
+            else:
+                constantes.add(ph)
             para_parse.append("\\mathit{%s}" % ph)
         else:
             if not funcoes_livres:
@@ -361,12 +381,30 @@ def _parsear(latex, funcoes):
     if misto:
         return _perda("nao_suportado:uso_misto:%s" % misto[0])
 
+    # `\pi` é a constante π (o parser o lê `Symbol('pi')`; composto nenhum chega aqui com esse nome: os compostos
+    # ainda têm o nome da marca); o `e` base de potência, marcado no pré-parse, é o número de Euler (`exp`)
     troca = {}
     for s in expr.atoms(Symbol):
-        novo = simbolos_de.get(s.name, _canonico(s.name))
-        if novo != s.name:
-            troca[s] = Symbol(novo)
+        if s.name == "pi":
+            troca[s] = pi
+        elif s.name in constantes:
+            troca[s] = E
+        else:
+            novo = simbolos_de.get(s.name, _canonico(s.name))
+            if novo != s.name:
+                troca[s] = Symbol(novo)
     expr = expr.xreplace(troca)
+    # `\pi` sozinho num lado da relação é o definiendum, uma variável (SCFT#528, eq. 20.1: π é a carteira
+    # replicante); lido como a constante seria "π = -C + S ∂C/∂S" — perda (decisão do PO, 05/10, opção A)
+    if isinstance(expr, Relational) and pi in expr.args:
+        return _perda("nao_suportado:\\pi_como_variavel")
+    # defesa em profundidade: o que sobrar como `Symbol('pi')` (`\mathit{pi}`) ou `Symbol('e')` base de potência
+    # (`\frac{x}{e}` é Pow(e, -1), `\sqrt{e}`, `\mathit{e}^{x}`) seria constante lida como símbolo, ou o
+    # contrário: perda
+    if Symbol("pi") in expr.atoms(Symbol):
+        return _perda("nao_suportado:constante_como_simbolo:pi")
+    if any(p.base == Symbol("e") for p in expr.atoms(Pow)):
+        return _perda("nao_suportado:constante_como_simbolo:e")
 
     def funcao_nova(f):
         nome = type(f).__name__
