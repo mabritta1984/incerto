@@ -288,6 +288,49 @@ class TesteDecisoes(unittest.TestCase):
         self.assertEqual(AO.decidir([e], [], [], [p1("a"), p4m("a")], dec)["equacoes"][0]["status"], "aprovado")
 
 
+class TesteRotular(unittest.TestCase):
+    """I4: `rotular_equacao` dá à equação o rótulo estável (`kappa`, `hill`, …) com que o relatório e o MCP a
+    acham; rótulo repetido no plano ou já em outra :Equacao do corpus recusa antes de qualquer escrita."""
+
+    def rot(self, equacao, rotulo, **extra):
+        return dict({"tipo": "rotular_equacao", "equacao": equacao, "rotulo": rotulo}, **extra)
+
+    def test_rotulo_vai_para_a_equacao_do_plano(self):
+        plano = AO.decidir([eq_fixa("a"), eq_fixa("b")], [], [], [p1("a"), p1("b")], [self.rot("a", "kappa")])
+        rotulos = {e["nome"]: e["rotulo"] for e in plano["equacoes"]}
+        self.assertEqual(rotulos, {"a": "kappa", "b": None})
+        self.assertIn("e.rotulo = l.rotulo", AO.CYPHER_EQUACOES)
+        self.assertIn("rotular_equacao", AO.TIPOS_DECISAO)
+
+    def test_rotulo_malformado_ou_repetido_e_recusado(self):
+        eqs, fis = [eq_fixa("a"), eq_fixa("b")], [p1("a"), p1("b")]
+        for decs in ([self.rot("a", "Kappa")], [self.rot("a", "1kappa")], [self.rot("a", "ka-ppa")],
+                     [self.rot("a", "")], [self.rot("a", "kappa", extra=1)], [{"tipo": "rotular_equacao", "equacao": "a"}],
+                     [self.rot("zz", "kappa")],                                         # equação fora da onda
+                     [self.rot("a", "kappa"), self.rot("b", "kappa")],                  # um rótulo, duas equações
+                     [self.rot("a", "kappa"), self.rot("a", "hill")]):                  # uma equação, dois rótulos
+            with self.assertRaises(ValueError, msg=decs):
+                AO.decidir(eqs, [], [], fis, decs)
+
+    def test_rotulo_ja_em_outra_equacao_do_corpus_recusa_antes_de_escrever(self):
+        plano = AO.decidir([eq_fixa("a"), eq_fixa("b")], [], [], [p1("a"), p1("b")], [self.rot("a", "kappa")])
+        chamadas = []
+
+        def falso(cred, db, cypher, par):
+            chamadas.append(cypher)
+            if cypher == AO.CYPHER_ROTULOS_EM_USO:
+                self.assertEqual(sorted(par["nomes"]), ["a", "b"])
+                self.assertEqual(par["linhas"], [{"rotulo": "kappa", "nome": "a"}])
+                return [["kappa", "Outro.pdf.md#4"]]
+            return []
+        with mock.patch.object(AO.nucleo, "query_com_retentativa", side_effect=falso):
+            with self.assertRaises(ValueError) as c:
+                AO.gravar({}, "db", plano, PARTICAO, ONDA, saida=lambda *_: None)
+        self.assertIn("kappa", str(c.exception)); self.assertIn("Outro.pdf.md#4", str(c.exception))
+        escritas = [q for q in chamadas if any(w in q for w in ("MERGE", "SET", "DELETE"))]
+        self.assertEqual(escritas, [])
+
+
 class TestePlano(unittest.TestCase):
     def test_tudo_no_plano_leva_status_e_fonte(self):
         fonte = {"documento": "Outro.pdf.md", "topico": "T"}
@@ -597,6 +640,19 @@ class TesteBancoReal(BaseOnda):
             self.assertEqual(self.q(st % (rotulo, nome)), [["staging", ["fora da rodada atual"]]], nome)
         self.assertEqual(self.q(st % ("Equacao", "Kelly.pdf.md#2"))[0][0], "aprovado")
         self.assertEqual(self.q("MATCH (:Equacao {corpus: $c, nome: 'Ramo.pdf.md#2'})-[r]->() RETURN count(r)"), [[0]])
+
+    def test_rotulo_gravado_e_colisao_com_outra_equacao_recusa_sem_gravar(self):
+        self.onda.decisoes = [{"tipo": "rotular_equacao", "equacao": "Kelly.pdf.md#2", "rotulo": "kelly"}]
+        self.onda.gravar()
+        self.executar()
+        self.assertEqual(self.q("MATCH (e:Equacao {corpus: $c, rotulo: 'kelly'}) RETURN e.nome"), [["Kelly.pdf.md#2"]])
+        limpar_banco_de_teste(self.cred, self.db)
+        NUC.query_api(self.cred, self.db, "CREATE (:Equacao {corpus: $c, nome: 'Outro.pdf.md#1', onda: 'outra', "
+                      "rotulo: 'kelly', status: 'aprovado', fonte: '{}'})", {"c": PARTICAO})
+        with self.assertRaises(SystemExit) as c:
+            self.onda.aprovar("--executar", banco=(self.cred, self.db))
+        self.assertIn("Outro.pdf.md#1", str(c.exception.code))
+        self.assertEqual(self.q("MATCH (n {corpus: $c}) RETURN count(n)"), [[1]])
 
     def test_nome_de_equacao_de_outra_onda_recusa_sem_gravar(self):
         NUC.query_api(self.cred, self.db, "CREATE (:Equacao {corpus: $c, nome: 'Kelly.pdf.md#2', onda: 'outra', "

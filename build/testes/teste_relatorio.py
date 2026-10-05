@@ -226,6 +226,34 @@ class TesteCLI(unittest.TestCase):
         self.assertIn("TESTE3", out)
         self.assertTrue(out.rstrip("\n").endswith(FECHAMENTO))
 
+    def test_cli_status_equacoes_marca_por_rotulo(self):
+        # I4: `--status-equacoes` (rótulo → status) chega ao relatório; os EQ_* são rótulos de :Equacao
+        caminho, ini, fim = self.cotahist_sintetico()
+        cache = os.path.join(self.tmp, "dados")
+        os.makedirs(cache)
+        with open(D._caminho_cache(cache, 11, ini, fim), "w", encoding="utf-8") as f:
+            json.dump([["2023-01-03", 0.05], ["2023-01-04", 0.07]], f)
+        status = os.path.join(self.tmp, "status.json")
+        with open(status, "w", encoding="utf-8") as f:
+            json.dump({R.EQ_KAPPA: "aprovado", R.EQ_HILL: "staging"}, f)
+        codigo, out, err = self.roda("--ticker", "TESTE3", "--cotahist", caminho, "--sgs-cache", cache,
+                                     "--status-equacoes", status)
+        self.assertEqual(codigo, 0, err)
+        self.assertRegex(out, r"κ\(n0=1, n=30\) = \S+ — equação `kappa` \[corpus\]")
+        self.assertRegex(out, r"α̂ de Hill.*— equação `hill` \[staging\]")
+        self.assertRegex(out, r"razão máximo/soma.*`razao_max_soma` \[externo\]")
+        for conteudo in ("[1, 2]", "{\"kappa\": 1}", "não é json"):
+            with open(status, "w", encoding="utf-8") as f:
+                f.write(conteudo)
+            codigo, out, err = self.roda("--ticker", "TESTE3", "--cotahist", caminho, "--sgs-cache", cache,
+                                         "--status-equacoes", status)
+            self.assertEqual((codigo, out), (2, ""), conteudo); self.assertIn("--status-equacoes", err)
+        codigo, _, err = self.roda("--ticker", "TESTE3", "--cotahist", caminho, "--sgs-cache", cache,
+                                   "--status-equacoes", os.path.join(self.tmp, "nada.json"))
+        self.assertEqual(codigo, 2); self.assertIn("nada.json", err)
+        for rotulo in (R.EQ_KAPPA, R.EQ_HILL, R.EQ_MAX_SOMA, R.EQ_ASSIMETRIA, R.EQ_CRESC_TEMPORAL, R.EQ_CRESC_ENSEMBLE):
+            self.assertRegex(rotulo, r"^[a-z][a-z0-9_]*$")
+
     def test_cli_ticker_ausente_e_erro_legivel(self):
         caminho, _, _ = self.cotahist_sintetico()
         codigo, out, err = self.roda("--ticker", "NADA9", "--cotahist", caminho, "--sgs-cache", self.tmp)

@@ -160,8 +160,8 @@ registrada, o item fica P4 vermelho "sem prova Wolfram" e vai ao bloco do passo 
 
 ### 7. Bloco de decisão único
 
-Um bloco por rodada ao PO, no formato de `references/devolucao.md`: renomeações, conceitos, heurísticas,
-momentos, indeterminados a aceitar (cada um com as chaves estruturadas exatas da sua linha de
+Um bloco por rodada ao PO, no formato de `references/devolucao.md`: renomeações, rótulos, conceitos,
+heurísticas, momentos, indeterminados a aceitar (cada um com as chaves estruturadas exatas da sua linha de
 `_esteira/incerto/fiscal-<onda>.jsonl`) e vermelhos (só nota; vermelho nunca promove). As respostas do PO
 viram linhas de `_esteira/incerto/decisoes-<onda>.jsonl`, transcritas sem interpretação; confira a
 transcrição com o ensaio do passo 8:
@@ -189,8 +189,9 @@ python3 skills/lavra/scripts/aprovar_onda.py --onda <onda> --executar
 ```
 
 **Pare se** o ensaio ou a execução recusarem: fiscal desatualizado (volte ao passo 6), decisão malformada
-ou momento decidido fora do candidato (volte ao passo 7), ou equação do plano já gravada em outra onda
-(renomear é decisão do PO na rodada). Nada foi gravado em nenhum desses casos.
+ou momento decidido fora do candidato (volte ao passo 7), equação do plano já gravada em outra onda
+(renomear é decisão do PO na rodada) ou rótulo já usado por outra equação do corpus (outro rótulo, na
+rodada). Nada foi gravado em nenhum desses casos.
 
 ## Limites
 

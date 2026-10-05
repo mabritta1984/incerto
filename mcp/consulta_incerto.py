@@ -12,7 +12,8 @@ Ferramentas (modelo do grafo: skills/lavra/references/grafo-incerto.md, dono ún
     LOCALIZA, não atesta: devolve `documento`, `topico` e `equacao` (nomes das `:Equacao` aprovadas cuja
     `fonte` é esse par) — nunca o texto do trecho (direito autoral) nem score. Sem Vertex, degrada para
     só o fulltext e diz (`"modo": "lexical"` + `aviso`).
-  - `ler_equacao(nome)`: latex, srepr, forma, momento_fechado, variáveis (`USA`), `VALIDA_SOB`,
+  - `ler_equacao(nome)`: por nome exato OU rótulo exato (`:Equacao.rotulo`, ex.: `kappa`); devolve nome,
+    rótulo, latex, srepr, forma, momento_fechado, variáveis (`USA`), `VALIDA_SOB`,
     `DERIVA_DE` com `verificado_por` (só as vias que deram verde) e `aceites_po` (as provas que passaram por
     aceite do PO, não por verificação — também na equação e em cada `VALIDA_SOB`), fonte.
   - `ler_conceito(nome)`: definição, sinônimos, heurísticas que o `SUSTENTA`m, equações que o `EXPRESSA`m,
@@ -127,9 +128,11 @@ CYPHER = {
     "equacoes_das_fontes": (
         "MATCH (e:Equacao {corpus: $corpus, status: 'aprovado'}) WHERE e.fonte IN $fontes\n"
         "RETURN e.fonte, e.nome ORDER BY e.nome"),
+    # por nome OU rótulo (`:Equacao.rotulo`, decisão `rotular_equacao`); as arestas são lidas pelo nome resolvido
     "equacao": (
-        "MATCH %s\n"
-        "RETURN e.latex, e.sympy_srepr, e.forma, e.momento_fechado, e.faixa_validade, e.fonte, e.aceites_po" % _EQ),
+        "MATCH (e:Equacao {corpus: $corpus, status: 'aprovado'}) WHERE e.nome = $nome OR e.rotulo = $nome\n"
+        "RETURN e.nome, e.rotulo, e.latex, e.sympy_srepr, e.forma, e.momento_fechado, e.faixa_validade, e.fonte, "
+        "e.aceites_po ORDER BY e.nome"),
     "equacao_variaveis": (
         "MATCH %s-[r:USA {corpus: $corpus, status: 'aprovado'}]->"
         "(v:Variavel {corpus: $corpus, status: 'aprovado'})\n"
@@ -266,15 +269,17 @@ def tool_buscar_equacao(args):
 
 
 def tool_ler_equacao(args):
-    nome = _nome(args)
+    pedido = _nome(args)
     _cred, _db, consultar = _contexto()
-    par = {"corpus": corpus(), "nome": nome}
-    linhas = consultar(CYPHER["equacao"], par)
+    linhas = consultar(CYPHER["equacao"], {"corpus": corpus(), "nome": pedido})
     if not linhas:
         return {"erro": NAO_ENCONTRADA}
-    latex, srepr, forma, momento, faixa, fonte, aceites = linhas[0]
+    # o nome exato vence o rótulo (o rótulo é único no corpus: aprovar_onda recusa repeti-lo)
+    nome, rotulo, latex, srepr, forma, momento, faixa, fonte, aceites = next(
+        (l for l in linhas if l[0] == pedido), linhas[0])
+    par = {"corpus": corpus(), "nome": nome}
     return {
-        "nome": nome, "status": "aprovado", "latex": latex, "srepr": srepr, "forma": forma,
+        "nome": nome, "rotulo": rotulo, "status": "aprovado", "latex": latex, "srepr": srepr, "forma": forma,
         "momento_fechado": _json(momento), "faixa_validade": faixa or [], "aceites_po": aceites or [],
         "variaveis": [{"nome": n, "simbolo": s, "papel": p, "simbolos": ss}
                       for n, s, p, ss in consultar(CYPHER["equacao_variaveis"], par)],
@@ -340,13 +345,15 @@ TOOLS = [
     },
     {
         "name": "ler_equacao",
-        "description": "Lê uma :Equacao aprovada por nome exato: latex, srepr (SymPy), forma, momento_fechado, "
-                       "variáveis (USA), VALIDA_SOB, DERIVA_DE (com verificado_por: só as vias que deram verde) e fonte "
+        "description": "Lê uma :Equacao aprovada por nome exato ou rótulo exato (ex.: kappa, hill): nome, rotulo, "
+                       "latex, srepr (SymPy), forma, momento_fechado, variáveis (USA), VALIDA_SOB, DERIVA_DE "
+                       "(com verificado_por: só as vias que deram verde) e fonte "
                        "(documento, tópico); aceites_po (na equação, em cada VALIDA_SOB e DERIVA_DE) lista as "
                        "provas indeterminadas que passaram por aceite do PO, não por verificação. "
                        "Só arestas aprovadas entre nós aprovados. Fora do corpus aprovado: "
                        "{\"erro\": \"não encontrada no corpus aprovado\"}.",
-        "inputSchema": {"type": "object", "properties": {"nome": {"type": "string"}}, "required": ["nome"]},
+        "inputSchema": {"type": "object", "properties": {"nome": {"type": "string", "description":
+                        "nome da equação (`<documento>#<ordem>`) ou seu rótulo (`kappa`)"}}, "required": ["nome"]},
         "annotations": _SO_LEITURA,
     },
     {

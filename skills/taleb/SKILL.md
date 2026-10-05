@@ -27,16 +27,30 @@ Comunicação exclusivamente em português do Brasil.
 | `[staging]` | do grafo, ainda em staging (sem aprovação) — vale como pista, não como doutrina |
 | `[externo]` | de fora do corpus: dados BR, saída de script, cálculo Wolfram, ou doutrina sem trecho conferido |
 
-O corpus é consultado pelo MCP `incerto-consulta` (Task 17) e suas ferramentas: `buscar_equacao` (achar a
-equação por nome ou tema), `ler_equacao` (forma canônica, LaTeX de origem, fonte e status), `ler_conceito`
-(verbete do conceito com seus trechos) e `situacao_camada` (se o grafo está de pé e qual onda está
-aprovada). **Sem o MCP** — não instalado, grafo fora do ar ou nenhuma onda aprovada — **toda afirmação de
-corpus é `[externo]`**, e a fonte é a linha `fonte:` de `references/doutrina.md` ou de
-`references/heuristicas.md`. Na versão 0.1.0-dev o corpus ainda não foi convertido (a primeira onda é a
-Task 19): até lá, doutrina e heurísticas são `[externo]` com o livro de Taleb nomeado.
+O corpus aprovado é consultado pelo MCP `incerto-consulta` (Task 17), que **só devolve o que está
+aprovado** (staging e inexistente dão a mesma resposta, "não encontrada no corpus aprovado"):
+`buscar_equacao` (localiza por tema os tópicos `(documento, tópico)` e os nomes das equações aprovadas
+deles), `ler_equacao` (por nome ou rótulo — `kappa`, `hill`, …: LaTeX de origem, `srepr`, forma, momento
+fechado, variáveis, validades, derivações com `verificado_por` e `aceites_po`, e a fonte), `ler_conceito`
+(tipo, definição, sinônimos, heurísticas que o sustentam, equações que o expressam e a fonte — **não**
+devolve trechos) e `situacao_camada` (corpus, database, contagem dos nós aprovados por rótulo, número de
+trechos e estado dos índices — **não** diz qual onda está aprovada). **Sem o MCP** — não instalado, grafo
+fora do ar ou nenhuma equação aprovada — **toda afirmação de corpus é `[externo]`**, e a fonte é a linha
+`fonte:` de `references/doutrina.md` ou de `references/heuristicas.md`. Na versão 0.1.0-dev o corpus ainda
+não foi convertido (a primeira onda é a Task 19): até lá, doutrina e heurísticas são `[externo]` com o livro
+de Taleb nomeado.
 
-Os números do `relatorio.py` já saem marcados por equação (`[corpus]` só se a equação `EQ_*` estiver
-aprovada). Não promova marca: um número `[externo]` continua `[externo]` na sua prosa.
+**`[staging]` vem só dos arquivos locais da esteira, nunca do MCP**: um candidato de
+`_esteira/incerto/equacoes-<onda>.jsonl` (com o rótulo que `_esteira/incerto/decisoes-<onda>.jsonl` lhe dá
+por `rotular_equacao`, se houver) que o MCP não acha aprovado. Sem esses arquivos à mão, o que o MCP não
+achou é `[externo]`.
+
+Os números do `relatorio.py` saem marcados por equação: os `EQ_*` do script são **rótulos** de `:Equacao`
+(`kappa`, `hill`, `razao_max_soma`, `assimetria_convexidade`, `crescimento_temporal`,
+`crescimento_ensemble`). Monte o mapa rótulo → status — `"aprovado"` se `ler_equacao(<rótulo>)` achou a
+equação; `"staging"` só se o rótulo está nos arquivos locais da esteira e o MCP não a achou — num JSON e
+passe-o com `--status-equacoes <arquivo.json>`; sem ele, tudo sai `[externo]`. Não promova marca: um
+número `[externo]` continua `[externo]` na sua prosa.
 
 ## Rito
 
@@ -45,12 +59,13 @@ aprovada). Não promova marca: um número `[externo]` continua `[externo]` na su
    é a perda máxima e se há ruína possível. "Vai subir?" vira "o que acontece com essa exposição se cair 30%
    e se subir 30%?". Se a pergunta só faz sentido como previsão, diga que a estação não prevê e ofereça o
    enquadramento de exposição.
-2. **Consultar o corpus pelo MCP e marcar o que achou.** `situacao_camada` primeiro; depois
-   `buscar_equacao` para as equações do diagnóstico (`kappa`, `hill`, `razao_max_soma`,
-   `assimetria_convexidade`, `crescimento_temporal`, `crescimento_ensemble`) e `ler_conceito` para os
-   conceitos em jogo (`references/doutrina.md` lista os dez). Para cada achado, registre a marca e a fonte
-   `(documento, tópico)`; o que não veio do grafo aprovado é `[staging]` ou `[externo]`. Sem MCP, diga isso
-   em uma linha e siga com `[externo]`.
+2. **Consultar o corpus pelo MCP e marcar o que achou.** `situacao_camada` primeiro; depois `ler_equacao`
+   pelos rótulos das equações do diagnóstico (`kappa`, `hill`, `razao_max_soma`, `assimetria_convexidade`,
+   `crescimento_temporal`, `crescimento_ensemble`), `buscar_equacao` para achar outras por tema e
+   `ler_conceito` para os conceitos em jogo (`references/doutrina.md` lista os dez). O que o MCP devolve é
+   `[corpus]`, com a fonte `(documento, tópico)`; o que ele não acha é `[staging]` só se estiver nos arquivos
+   locais da esteira (`_esteira/incerto/equacoes-<onda>.jsonl` e `decisoes-<onda>.jsonl`), senão
+   `[externo]`. Sem MCP, diga isso em uma linha e siga com `[externo]`.
 3. **Buscar os dados pelo `dados_br.py` e declarar se vieram do cache.** Séries do SGS:
    `python3 skills/taleb/scripts/dados_br.py --sgs <código> --inicio <aaaa-mm-dd> --fim <aaaa-mm-dd>`
    (cache em `dados/sgs-<código>-<início>-<fim>.json`: se o arquivo já existia antes da chamada, os dados
@@ -60,8 +75,9 @@ aprovada). Não promova marca: um número `[externo]` continua `[externo]` na su
    bloqueada, peça ao PO o ZIP anual baixado à mão em `dados/`, como em `references/dados-br.md`. Todo dado
    BR é `[externo]`. Sem dado, não há diagnóstico numérico: diga o que falta e pare.
 4. **Rodar os diagnósticos.** O relatório completo:
-   `python3 skills/taleb/scripts/relatorio.py --ticker <TICKER> --cotahist <arquivo> --sgs-cache dados`
-   (caudas, convexidade, ergodicidade e veredito determinístico, cada número com a equação e a marca). Para
+   `python3 skills/taleb/scripts/relatorio.py --ticker <TICKER> --cotahist <arquivo> --sgs-cache dados --status-equacoes <arquivo.json>`
+   (caudas, convexidade, ergodicidade e veredito determinístico, cada número com a equação e a marca; o JSON
+   é o mapa rótulo → status do passo 2). Para
    uma medida isolada ou uma exposição que não é ativo listado (um barbell, uma aposta com p e b), use as
    funções de `skills/taleb/scripts/caudas.py` (`razao_max_soma`, `hill`, `kappa`, `sobrevivencia_loglog`) e
    `skills/taleb/scripts/convexidade.py` (`assimetria`, `assimetria_empirica`, `barbell`, `kelly`,

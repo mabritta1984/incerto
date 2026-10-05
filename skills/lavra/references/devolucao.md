@@ -11,7 +11,7 @@ vale o `grafo-incerto.md` e esta reference é corrigida.
 
 - **Um bloco por rodada.** Tudo o que a rodada pede ao PO vai junto, depois do fiscal com as duas vias
   (passo 6). Nada é perguntado aos pedaços nem decidido em silêncio no meio do caminho.
-- **Ordem fixa**, as seis seções abaixo, nessa ordem; seção sem item aparece com "nada nesta rodada".
+- **Ordem fixa**, as sete seções abaixo, nessa ordem; seção sem item aparece com "nada nesta rodada".
 - **Item autossuficiente.** Cada item traz o que o PO precisa para decidir sem abrir arquivo: a equação
   (nome, LaTeX de origem, `(documento, tópico)`), a linha do fiscal quando houver, e a saída Wolfram verbatim
   quando ela é o motivo do item.
@@ -33,7 +33,19 @@ variável passam a usar o mesmo `:Variavel`.
 {"equacao": "<documento>.pdf.md#<ordem>", "nome": "indice_de_cauda", "simbolo": "alpha", "tipo": "renomear_variavel"}
 ```
 
-### 2. Conceitos (`conceito`)
+### 2. Rótulos (`rotular_equacao`)
+
+Rótulo estável que a estação `taleb` usa para achar a equação — os `EQ_*` do `relatorio.py` (`kappa`,
+`hill`, `razao_max_soma`, `assimetria_convexidade`, `crescimento_temporal`, `crescimento_ensemble`) e o
+`ler_equacao` do MCP aceitam o rótulo no lugar do nome. O item mostra a equação (nome, LaTeX de origem,
+`(documento, tópico)`) e o rótulo proposto (`^[a-z][a-z0-9_]*$`). Uma equação, um rótulo; rótulo repetido
+na rodada ou já usado por outra `:Equacao` do corpus recusa a aprovação antes de qualquer escrita.
+
+```jsonl
+{"equacao": "<documento>.pdf.md#<ordem>", "rotulo": "kappa", "tipo": "rotular_equacao"}
+```
+
+### 3. Conceitos (`conceito`)
 
 Conceito que o trecho define e que entra como `:Conceito` aprovado. O item mostra o nome, o
 `tipo_conceito` proposto (`fenomeno`, `principio`, `falacia` ou `regime`), a definição tirada do trecho, os
@@ -43,7 +55,7 @@ sinônimos e a fonte `{documento, topico}` dos `conferidos/`.
 {"definicao": "<definição tirada do trecho>", "fonte": {"documento": "<documento>.pdf.md", "topico": "<tópico>"}, "nome": "extremistao", "sinonimos": ["Extremistão"], "tipo": "conceito", "tipo_conceito": "regime"}
 ```
 
-### 3. Heurísticas (`heuristica`)
+### 4. Heurísticas (`heuristica`)
 
 Regra prática com `condicao` relacional sobre símbolos (a mesma gramática das `validades-`), fonte e os
 nomes que ela sustenta — conceito decidido nesta rodada ou equação da onda (`SUSTENTA` herda o status do
@@ -53,7 +65,7 @@ alvo).
 {"condicao": "alpha < 2", "enunciado": "<enunciado tirado do trecho>", "fonte": {"documento": "<documento>.pdf.md", "topico": "<tópico>"}, "nome": "variancia_infinita", "sustenta": ["extremistao"], "tipo": "heuristica"}
 ```
 
-### 4. Momentos (`momento_fechado`)
+### 5. Momentos (`momento_fechado`)
 
 Momento fechado que a fonte declara para a equação (`{"media": "...", "variancia": "..."}`, sintaxe SymPy).
 Diferente das outras decisões, este muda o candidato: depois da resposta, o rito volta ao passo 5
@@ -63,7 +75,7 @@ Diferente das outras decisões, este muda o candidato: depois da resposta, o rit
 {"equacao": "<documento>.pdf.md#<ordem>", "momento_fechado": {"media": "alpha*L/(alpha - 1)"}, "tipo": "momento_fechado"}
 ```
 
-### 5. Indeterminados a aceitar (`aceitar_indeterminado`)
+### 6. Indeterminados a aceitar (`aceitar_indeterminado`)
 
 Cada linha `indeterminado` do `fiscal-<onda>.jsonl` que o PO pode aceitar (filha que escolhe um ramo,
 `Solve` sem resposta, condição que o SymPy não decide). O aceite casa **exatamente** uma linha: `prova` mais
@@ -80,7 +92,7 @@ P4, a saída Wolfram verbatim.
 {"equacao": "<documento>.pdf.md#<momento>", "prova": "P4", "tipo": "aceitar_indeterminado"}
 ```
 
-### 6. Vermelhos (só nota)
+### 7. Vermelhos (só nota)
 
 Toda linha `vermelho` do fiscal, com o `detalhe` e, quando a P4 é o motivo, as duas saídas lado a lado
 (SymPy e Wolfram verbatim). **Vermelho nunca promove**, com ou sem decisão: não há linha JSONL para ele e o

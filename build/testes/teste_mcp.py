@@ -87,8 +87,8 @@ class TesteProtocolo(unittest.TestCase):
             self.assertEqual(MCP.versao(), json.load(f)["version"])
 
     def test_tools_call_ida_e_volta_com_banco_falso(self):
-        banco = BancoFalso({"equacao": [["x = y", "Equality(Symbol('x'), Symbol('y'))", "algebrica", None, [],
-                                         fonte("Doc.pdf.md", "T1"), []]]})
+        banco = BancoFalso({"equacao": [["Doc.pdf.md#1", None, "x = y", "Equality(Symbol('x'), Symbol('y'))",
+                                         "algebrica", None, [], fonte("Doc.pdf.md", "T1"), []]]})
         MCP.CONTEXTO = ({}, "neo4j", banco)
         self.addCleanup(setattr, MCP, "CONTEXTO", None)
         saida = io.StringIO()
@@ -255,8 +255,8 @@ class TesteBuscarEquacao(ComBancoFalso):
 class TesteLeituras(ComBancoFalso):
     def test_ler_equacao_monta_campos(self):
         banco = self.usar(BancoFalso({
-            "equacao": [["\\kappa", "Symbol('kappa')", "algebrica", json.dumps({"media": "0"}), ["n > 1"],
-                         fonte("A.pdf.md", "Kappa"), ["P3"]]],
+            "equacao": [["A.pdf.md#1", None, "\\kappa", "Symbol('kappa')", "algebrica", json.dumps({"media": "0"}),
+                         ["n > 1"], fonte("A.pdf.md", "Kappa"), ["P3"]]],
             "equacao_variaveis": [["n", "n", "entrada", ["n"]]],
             "equacao_valida_sob": [["n > 1", "n", fonte("A.pdf.md", "Kappa"), ["P3"]]],
             "equacao_deriva_de": [["A.pdf.md#0", 1, "kappa", json.dumps({"x": "y"}), ["sympy@1.14.0"],
@@ -274,6 +274,22 @@ class TesteLeituras(ComBancoFalso):
         self.assertEqual(r["deriva_de"][0]["substituicao"], {"x": "y"})
         self.assertEqual(r["status"], "aprovado")
         self.assertTrue(all(p["corpus"] == "incerto" and p["nome"] == "A.pdf.md#1" for _s, p in banco.chamadas))
+
+    def test_ler_equacao_aceita_o_rotulo(self):
+        # I4: o relatório e a estação acham a equação pelo rótulo estável (`kappa`), não só pelo nome
+        def equacao(par):
+            linha = ["A.pdf.md#1", "kappa", "\\kappa", "Symbol('kappa')", "algebrica", None, [],
+                     fonte("A.pdf.md", "Kappa"), []]
+            return [linha] if par["nome"] in ("kappa", "A.pdf.md#1") else []
+        banco = self.usar(BancoFalso({"equacao": equacao}))
+        for pedido in ("kappa", "A.pdf.md#1"):
+            r = MCP.tool_ler_equacao({"nome": pedido})
+            self.assertEqual((r["nome"], r["rotulo"], r["status"]), ("A.pdf.md#1", "kappa", "aprovado"), pedido)
+        self.assertEqual(MCP.tool_ler_equacao({"nome": "kapp"}), {"erro": "não encontrada no corpus aprovado"})
+        self.assertIn("e.nome = $nome OR e.rotulo = $nome", MCP.CYPHER["equacao"])
+        # as arestas são lidas pelo nome resolvido, nunca pelo rótulo pedido
+        arestas = [p for s, p in banco.chamadas if s != MCP.CYPHER["equacao"]]
+        self.assertTrue(arestas); self.assertEqual({p["nome"] for p in arestas}, {"A.pdf.md#1"})
 
     def test_nao_encontrada_tem_a_mesma_mensagem_nas_duas(self):
         banco = self.usar(BancoFalso())
@@ -359,6 +375,14 @@ class TesteSoAprovadoNoBanco(unittest.TestCase):
         self.assertEqual(MCP.tool_ler_equacao({"nome": "D.pdf.md#1"}), {"erro": "não encontrada no corpus aprovado"})
         self.assertEqual(MCP.tool_ler_equacao({"nome": "D.pdf.md#9"}), {"erro": "não encontrada no corpus aprovado"})
         self.assertEqual(MCP.tool_ler_equacao({"nome": "D.pdf.md#2"})["latex"], "D.pdf.md#2")
+
+    def test_ler_equacao_por_rotulo_so_aprovada(self):
+        self.q("CREATE (:Equacao {corpus: $c, nome: 'K.pdf.md#1', rotulo: 'kappa', status: 'aprovado', latex: 'k', "
+               "fonte: $f}), (:Equacao {corpus: $c, nome: 'H.pdf.md#1', rotulo: 'hill', status: 'staging', "
+               "latex: 'h', fonte: $f})", {"c": PARTICAO, "f": self.f})
+        r = MCP.tool_ler_equacao({"nome": "kappa"})
+        self.assertEqual((r["nome"], r["rotulo"], r["latex"]), ("K.pdf.md#1", "kappa", "k"))
+        self.assertEqual(MCP.tool_ler_equacao({"nome": "hill"}), {"erro": "não encontrada no corpus aprovado"})
 
     def test_aresta_em_staging_entre_nos_aprovados_nao_aparece(self):
         self.nos({"rotulo": "Equacao", "nome": "E#filha", "status": "aprovado"},

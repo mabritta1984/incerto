@@ -35,7 +35,7 @@ pelo portão do PO dos `conferidos/`, não pelo fiscal. `:Documento` é criado p
 |---|---|---|---|
 | `:Documento` | `{corpus, nome}` | `status`, `fonte` (`{"documento": nome, "topico": null}`) | ingestão (chave); aprovação (`status`, `fonte`) |
 | `:Trecho` | `{corpus, documento, topico, parte}` | `texto` (verbatim), `onda`, `ordem`, `embedding_gemini`, `junta`, `cabecalho` | ingestão |
-| `:Equacao` | `{corpus, nome}` | `latex`, `sympy_srepr`, `forma` (`algebrica`\|`funcional`\|`perda`), `momento_fechado` (JSON ou ausente), `hipoteses`, `faixa_validade` (lista das condições declaradas em `validades-`), `onda`, `ordem`, `status`, `fonte`, `pendencias`, `aceites_po` | aprovação |
+| `:Equacao` | `{corpus, nome}` | `latex`, `sympy_srepr`, `forma` (`algebrica`\|`funcional`\|`perda`), `momento_fechado` (JSON ou ausente), `hipoteses`, `faixa_validade` (lista das condições declaradas em `validades-`), `onda`, `ordem`, `status`, `fonte`, `pendencias`, `aceites_po`, `rotulo` (decisão `rotular_equacao`; único no corpus; ausente sem decisão) | aprovação |
 | `:Variavel` | `{corpus, nome}` | `simbolo`, `tipo` (`variavel`\|`parametro`\|`constante`), `status`, `fonte` | aprovação |
 | `:Conceito` | `{corpus, nome}` | `tipo` (`fenomeno`\|`principio`\|`falacia`\|`regime`), `definicao`, `sinonimos` (lista), `onda`, `status`, `fonte` | aprovação (decisão `conceito`) |
 | `:Heuristica` | `{corpus, nome}` | `enunciado`, `condicao`, `onda`, `status`, `fonte` | aprovação (decisão `heuristica`) |
@@ -119,6 +119,7 @@ a menos, valor vazio ou repetição recusam a execução inteira**.
 | `heuristica` | `nome`, `enunciado`, `condicao`, `fonte`, `sustenta` (nomes de conceito decidido ou equação da onda) | `:Heuristica` aprovada e um `SUSTENTA` por nome, com o status do alvo |
 | `aceitar_indeterminado` | `prova` + **exatamente** as chaves estruturadas da linha: P1 `equacao`; P2 `mae`, `filha`, `simbolo`, `substituicao`; P3 `equacao`, `condicao`; P4 `mae`, `filha` ou `equacao` | aquela linha `indeterminado` passa a passar; nada mais (sem curinga) |
 | `momento_fechado` | `equacao`, `momento_fechado` (`{"media": "...", ...}`) | aplicado ao candidato por `--aplicar-momentos`, **antes do fiscal** |
+| `rotular_equacao` | `equacao` (`<documento>#<ordem>`, candidato da onda), `rotulo` (`^[a-z][a-z0-9_]*$`) | grava `:Equacao.rotulo` — o nome estável com que o `relatorio.py` (`EQ_*`) e o MCP `ler_equacao` acham a equação. Uma equação, um rótulo; rótulo repetido no plano recusa na validação, e rótulo já em outra `:Equacao` do corpus (fora do plano) recusa antes de qualquer escrita |
 
 Rito do momento fechado: decisão em `decisoes-` → `aprovar_onda.py --onda <onda> --aplicar-momentos`
 (regrava `equacoes-<onda>.jsonl`, chaves ordenadas, `\n`) → `fiscal.py` → prova Wolfram do momento
@@ -134,7 +135,8 @@ python3 skills/lavra/scripts/aprovar_onda.py --onda <onda> --aplicar-momentos
     [--corpus incerto] [--raiz-esteira _esteira/incerto] [--database <db>]
 ```
 
-Sem `--executar` o banco nem é aberto. Com ele, a ordem é: recusar colisão de nome com outra onda →
+Sem `--executar` o banco nem é aberto. Com ele, a ordem é: recusar colisão de nome com outra onda e de
+rótulo com outra equação →
 rebaixar os nós da onda fora do plano → limpar as arestas da onda → nós → arestas → variáveis órfãs →
 status das variáveis.
 
@@ -159,6 +161,10 @@ Aprovação — colisão com outra onda (recusa se devolver linha) e rebaixament
 ```cypher
 MATCH (e:Equacao {corpus: $corpus}) WHERE e.nome IN $nomes AND e.onda <> $onda
 RETURN e.nome, e.onda ORDER BY e.nome
+
+// rótulo do plano já em outra :Equacao (recusa se devolver linha); $linhas [{rotulo, nome}], $nomes = o plano
+UNWIND $linhas AS l MATCH (e:Equacao {corpus: $corpus, rotulo: l.rotulo})
+WHERE NOT e.nome IN $nomes RETURN e.rotulo, e.nome ORDER BY e.rotulo, e.nome
 
 MATCH (n {corpus: $corpus, onda: $onda}) WHERE n:Equacao OR n:Conceito OR n:Heuristica
 RETURN [r IN labels(n) WHERE r IN ['Equacao', 'Conceito', 'Heuristica']][0], n.nome ORDER BY n.nome
@@ -188,7 +194,8 @@ UNWIND $linhas AS l
 MERGE (e:Equacao {corpus: $corpus, nome: l.nome})
 SET e.latex = l.latex, e.sympy_srepr = l.sympy_srepr, e.forma = l.forma, e.momento_fechado = l.momento_fechado,
     e.hipoteses = l.hipoteses, e.faixa_validade = l.faixa_validade, e.onda = l.onda, e.ordem = l.ordem,
-    e.status = l.status, e.fonte = l.fonte, e.pendencias = l.pendencias, e.aceites_po = l.aceites_po
+    e.status = l.status, e.fonte = l.fonte, e.pendencias = l.pendencias, e.aceites_po = l.aceites_po,
+    e.rotulo = l.rotulo
 
 UNWIND $linhas AS l
 MERGE (v:Variavel {corpus: $corpus, nome: l.nome})

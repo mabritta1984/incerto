@@ -29,6 +29,9 @@ ou decisão malformada recusa a execução (ValueError → saída com a mensagem
                         (`tipo` da linha é o tipo da decisão; o do conceito vai em `tipo_conceito`)
   heuristica            {nome, enunciado, condicao, fonte, sustenta: [nomes de conceito ou equação da onda]}
   aceitar_indeterminado {prova, <chaves estruturadas da linha do fiscal>}
+  rotular_equacao       {equacao: "<documento>#<ordem>", rotulo: ^[a-z][a-z0-9_]*$} — grava `:Equacao.rotulo`
+                        (o nome estável com que o relatório e o MCP a acham); uma equação, um rótulo; rótulo
+                        repetido no plano, ou já em outra :Equacao do corpus, recusa antes de qualquer escrita.
   momento_fechado       {equacao, momento_fechado: {"media": "...", ...}} — aplicado ao candidato por
                         `--aplicar-momentos`, ANTES do fiscal (a P4 e a `impressao` Wolfram leem o momento
                         do candidato); na aprovação, decisão não aplicada recusa a execução.
@@ -71,7 +74,9 @@ CAMPOS_DECISAO = {
     "conceito": ("nome", "tipo_conceito", "definicao", "sinonimos", "fonte"),
     "heuristica": ("nome", "enunciado", "condicao", "fonte", "sustenta"),
     "momento_fechado": ("equacao", "momento_fechado"),
+    "rotular_equacao": ("equacao", "rotulo"),
 }
+RE_ROTULO = re.compile(r"^[a-z][a-z0-9_]*$")
 TIPOS_DECISAO = tuple(sorted(set(CAMPOS_DECISAO) | {"aceitar_indeterminado"}))
 
 RE_LADO_ESQUERDO = re.compile(r"^Equality\(Symbol\('([^']+)'\),")
@@ -157,7 +162,8 @@ def validar_decisoes(decisoes):
                              % (n, tipo, sorted(d), sorted(set(CAMPOS_DECISAO[tipo]) | {"tipo"})))
         onde = "decisão %d (%s)" % (n, tipo)
         textos = {"renomear_variavel": ("equacao", "simbolo", "nome"), "conceito": ("nome", "definicao"),
-                  "heuristica": ("nome", "enunciado", "condicao"), "momento_fechado": ("equacao",)}[tipo]
+                  "heuristica": ("nome", "enunciado", "condicao"), "momento_fechado": ("equacao",),
+                  "rotular_equacao": ("equacao", "rotulo")}[tipo]
         for k in textos:
             if not _texto(d[k]):
                 raise ValueError("%s: `%s` vazio ou não texto" % (onde, k))
@@ -170,13 +176,16 @@ def validar_decisoes(decisoes):
                 raise ValueError("%s: `sinonimos` tem de ser lista de textos" % onde)
         if tipo == "heuristica" and (not isinstance(d["sustenta"], list) or not all(_texto(s) for s in d["sustenta"])):
             raise ValueError("%s: `sustenta` tem de ser lista de nomes" % onde)
+        if tipo == "rotular_equacao" and not RE_ROTULO.match(d["rotulo"]):
+            raise ValueError("%s: rotulo %r — use ^[a-z][a-z0-9_]*$" % (onde, d["rotulo"]))
         if tipo == "momento_fechado":
             m = d["momento_fechado"]
             if not isinstance(m, dict) or not m or not all(_texto(k) and _texto(v) for k, v in m.items()):
                 raise ValueError("%s: `momento_fechado` tem de ser objeto não vazio {momento: expressão}" % onde)
         por_tipo[tipo].append(d)
     for tipo, chave in (("renomear_variavel", ("equacao", "simbolo")), ("conceito", ("nome",)),
-                        ("heuristica", ("nome",)), ("momento_fechado", ("equacao",))):
+                        ("heuristica", ("nome",)), ("momento_fechado", ("equacao",)),
+                        ("rotular_equacao", ("equacao",)), ("rotular_equacao", ("rotulo",))):
         vistos = set()
         for d in por_tipo[tipo]:
             k = tuple(d[c] for c in chave)
@@ -254,6 +263,11 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
             raise ValueError("momento_fechado decidido para %s não está no candidato — rode "
                              "`aprovar_onda.py --aplicar-momentos` e o fiscal de novo" % d["equacao"])
 
+    rotulos = {d["equacao"]: d["rotulo"] for d in por_tipo["rotular_equacao"]}
+    desconhecidas = sorted(set(rotulos) - set(por_nome))
+    if desconhecidas:
+        raise ValueError("rotular_equacao de equação desconhecida: %s" % ", ".join(desconhecidas))
+
     nomes_var = {(e["nome"], v["simbolo"]): v["nome"] for e in equacoes for v in e.get("variaveis") or []}
     for d in por_tipo["renomear_variavel"]:
         if (d["equacao"], d["simbolo"]) not in nomes_var:
@@ -302,7 +316,8 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
         plano_eq.append({"nome": nome, "latex": e.get("latex"), "sympy_srepr": e.get("srepr"), "forma": e.get("forma"),
                          "momento_fechado": c(e["momento_fechado"]) if e.get("momento_fechado") else None,
                          "hipoteses": None, "faixa_validade": conds, "onda": e.get("onda"), "ordem": e.get("ordem"),
-                         "fonte": c(e["fonte"]), "status": status_eq[nome], "pendencias": pend, "aceites_po": aceitas})
+                         "fonte": c(e["fonte"]), "status": status_eq[nome], "pendencias": pend, "aceites_po": aceitas,
+                         "rotulo": rotulos.get(nome)})
 
     # variáveis: USA, DEFINIDA_POR
     usa, definida, variaveis = [], [], {}
@@ -450,6 +465,10 @@ CYPHER_LIMPAR_ARESTAS = (
 CYPHER_COLISOES = ("MATCH (e:Equacao {corpus: $corpus}) WHERE e.nome IN $nomes AND e.onda <> $onda "
                    "RETURN e.nome, e.onda ORDER BY e.nome")
 
+# `rotulo` é único no corpus: rótulo do plano já em outra :Equacao (fora do plano, que é reescrito) recusa
+CYPHER_ROTULOS_EM_USO = ("UNWIND $linhas AS l MATCH (e:Equacao {corpus: $corpus, rotulo: l.rotulo}) "
+                         "WHERE NOT e.nome IN $nomes RETURN e.rotulo, e.nome ORDER BY e.rotulo, e.nome")
+
 # nós da onda (com `onda` gravada) que já estão no banco: o que não está no plano atual é rebaixado
 CYPHER_NOS_DA_ONDA = ("MATCH (n {corpus: $corpus, onda: $onda}) WHERE n:Equacao OR n:Conceito OR n:Heuristica "
                       "RETURN [r IN labels(n) WHERE r IN ['Equacao', 'Conceito', 'Heuristica']][0], n.nome "
@@ -474,7 +493,8 @@ UNWIND $linhas AS l
 MERGE (e:Equacao {corpus: $corpus, nome: l.nome})
 SET e.latex = l.latex, e.sympy_srepr = l.sympy_srepr, e.forma = l.forma, e.momento_fechado = l.momento_fechado,
     e.hipoteses = l.hipoteses, e.faixa_validade = l.faixa_validade, e.onda = l.onda, e.ordem = l.ordem,
-    e.status = l.status, e.fonte = l.fonte, e.pendencias = l.pendencias, e.aceites_po = l.aceites_po
+    e.status = l.status, e.fonte = l.fonte, e.pendencias = l.pendencias, e.aceites_po = l.aceites_po,
+    e.rotulo = l.rotulo
 """
 
 CYPHER_VARIAVEIS = """
@@ -566,7 +586,8 @@ def a_rebaixar(existentes, plano):
 
 def gravar(cred, db, plano, corpus, onda, saida=print):
     """Grava o plano em lotes, na ordem nós → arestas. Antes de qualquer escrita, recusa (ValueError) se um
-    nome de equação do plano já existe no banco em outra onda. Reaprovar a onda substitui as arestas dela e
+    nome de equação do plano já existe no banco em outra onda, ou se um rótulo do plano já está em outra
+    :Equacao do corpus. Reaprovar a onda substitui as arestas dela e
     rebaixa a `staging` o nó da onda que saiu da rodada (nada fica `aprovado` de uma rodada anterior)."""
     def lote(cypher, linhas, extra=None):
         if linhas:
@@ -577,6 +598,12 @@ def gravar(cred, db, plano, corpus, onda, saida=print):
     if colisoes:
         raise ValueError("equação já existe no grafo em outra onda — renomeie na rodada: %s"
                          % "; ".join("%s (onda %s)" % (n, o) for n, o in colisoes))
+    rotuladas = [{"rotulo": l["rotulo"], "nome": l["nome"]} for l in plano["equacoes"] if l.get("rotulo")]
+    em_uso = rotuladas and nucleo.query_com_retentativa(cred, db, CYPHER_ROTULOS_EM_USO, {
+        "corpus": corpus, "linhas": rotuladas, "nomes": [l["nome"] for l in plano["equacoes"]]})
+    if em_uso:
+        raise ValueError("rótulo já usado por outra equação do corpus — escolha outro na rodada: %s"
+                         % "; ".join("%s (em %s)" % (r, n) for r, n in em_uso))
     existentes = nucleo.query_com_retentativa(cred, db, CYPHER_NOS_DA_ONDA, {"corpus": corpus, "onda": onda})
     rebaixar = a_rebaixar([tuple(r) for r in existentes], plano)
     lote(CYPHER_REBAIXAR, [{"rotulo": r, "nome": n} for r, n in rebaixar], {"onda": onda, "pendencia": PENDENCIA_FORA})

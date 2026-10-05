@@ -5,8 +5,9 @@ retornos brasileiros, em Markdown determinístico. Só biblioteca padrão.
 
 Cada número sai com a equação que o produziu e a marcação de fonte: `[corpus]` se `status_equacoes[nome] ==
 "aprovado"`, `[staging]` se `"staging"`, `[externo]` se o nome falta, o status é outro ou `status_equacoes` é
-None. Os nomes `EQ_*` abaixo são um mapa fixo métrica -> equação e DEVEM coincidir com os nomes dos nós
-`:Equacao` aprovados pelo PO; a conferência é a reconciliação da Task 19.
+None. Os `EQ_*` abaixo são um mapa fixo métrica -> RÓTULO de equação: o `:Equacao.rotulo` que o PO dá pela
+decisão `rotular_equacao` (`skills/lavra/references/grafo-incerto.md`) e com que o MCP `ler_equacao` acha a
+equação. `status_equacoes` é indexado por esses rótulos.
 
 Entrada: `retornos` são retornos LOGARÍTMICOS diários (saída de `dados_br.retornos_log`). Caudas e assimetria
 usam-nos como vêm; a seção de ergodicidade os converte em retornos simples (exp(r) − 1), que é o que
@@ -23,11 +24,16 @@ ativo: usa só frágil/robusto/antifrágil/Extremistão/Mediocristão e termina 
 Menos de 60 retornos: ValueError com a contagem (métricas de cauda não significam nada em amostra assim).
 
 Uso:
-    python3 skills/taleb/scripts/relatorio.py --ticker PETR4 --cotahist dados/COTAHIST_A2024.ZIP --sgs-cache dados
+    python3 skills/taleb/scripts/relatorio.py --ticker PETR4 --cotahist dados/COTAHIST_A2024.ZIP --sgs-cache dados \
+        [--status-equacoes status.json]
+`--status-equacoes`: JSON objeto rótulo -> status (`{"kappa": "aprovado", "hill": "staging"}`), montado pela
+estação `taleb` (aprovado: `ler_equacao(<rótulo>)` achou a equação; staging: só dos arquivos locais da
+esteira). Sem ele, tudo é `[externo]`.
 Lê o COTAHIST local e a Selic diária (SGS 11) do cache `--sgs-cache` (o nome do cache depende do período; sem
 cache, baixa pelo SGS). Código 0 em sucesso, 2 em dado indisponível, amostra pequena ou erro de uso.
 """
 import argparse
+import json
 import math
 import random
 import sys
@@ -154,6 +160,20 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
     return "\n".join(L) + "\n"
 
 
+def ler_status_equacoes(caminho):
+    """O mapa rótulo -> status de `--status-equacoes`; ValueError se não for um objeto JSON de textos."""
+    try:
+        with open(caminho, encoding="utf-8") as f:
+            mapa = json.load(f)
+    except OSError as e:
+        raise ValueError(f"--status-equacoes {caminho}: {e.strerror or e}")
+    except ValueError as e:
+        raise ValueError(f"--status-equacoes {caminho}: JSON inválido ({e})")
+    if not isinstance(mapa, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in mapa.items()):
+        raise ValueError(f"--status-equacoes {caminho}: use um objeto JSON rótulo -> status (textos)")
+    return mapa
+
+
 def main(argv=None, abrir=urllib.request.urlopen):
     ap = argparse.ArgumentParser(description="Relatório de caudas, convexidade e ergodicidade de um ativo.")
     ap.add_argument("--ticker", required=True, help="CODNEG no COTAHIST")
@@ -161,8 +181,11 @@ def main(argv=None, abrir=urllib.request.urlopen):
     ap.add_argument("--sgs-cache", default="dados", help="pasta do cache do SGS (padrão: dados)")
     ap.add_argument("--inicio", type=date.fromisoformat, help="início do período da Selic (padrão: 1º retorno)")
     ap.add_argument("--fim", type=date.fromisoformat, help="fim do período da Selic (padrão: último retorno)")
+    ap.add_argument("--status-equacoes", help="JSON rótulo -> status (aprovado|staging) das equações EQ_*; "
+                                              "sem ele, tudo é [externo]")
     a = ap.parse_args(argv)
     try:
+        status_equacoes = ler_status_equacoes(a.status_equacoes) if a.status_equacoes else None
         regs = dados_br.cotahist_ler(a.cotahist, {a.ticker})
         if not regs:
             raise ValueError(f"ticker {a.ticker} ausente em {a.cotahist}")
@@ -174,7 +197,7 @@ def main(argv=None, abrir=urllib.request.urlopen):
         if not selic:
             raise ValueError(f"SGS 11 sem observações entre {ini} e {fim}")
         taxa = math.fsum(v for _, v in selic) / len(selic) / 100.0  # SGS 11 vem em % ao dia
-        texto = relatorio_ativo(a.ticker, retornos, taxa, None,
+        texto = relatorio_ativo(a.ticker, retornos, taxa, status_equacoes,
                                 fonte_taxa_livre=f"SGS série 11, média de {len(selic)} observações "
                                                  f"({ini.isoformat()} a {fim.isoformat()})")
     except (dados_br.DadosIndisponiveis, ValueError, OSError) as e:

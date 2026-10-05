@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Task 19 (passo 1): estação `lavra` — SKILL.md (frontmatter, bloco `regras-do-incerto` injetado, o rito por
 onda em oito passos na ordem, cada um com comando e condição de parada, e só scripts e flags que existem) e
-`references/devolucao.md` (o bloco de decisão único da rodada: os cinco tipos de decisão na ordem, cada
+`references/devolucao.md` (o bloco de decisão único da rodada: os seis tipos de decisão na ordem, cada
 linha JSONL aceita pelo validador de `aprovar_onda.py`, e vermelho que nunca promove). Nada aqui toca rede."""
 import json
 import os
@@ -27,8 +27,9 @@ PASSOS = ("Copiar os originais", "Disparar a conversão", "Portão", "Recortar, 
 CUSTOSOS = (1, 2, 4, 8)
 RITO_SCRIPTS = ("conferir_onda.py", "recortar_trechos.py", "ingerir_trechos.py", "extrair_equacoes.py",
                 "aprovar_onda.py", "fiscal.py", "registrar_prova.py")
-# Ordem do bloco de decisão: renomeações, conceitos, heurísticas, momentos, indeterminados, vermelhos.
-DECISOES = ("renomear_variavel", "conceito", "heuristica", "momento_fechado", "aceitar_indeterminado")
+# Ordem do bloco de decisão: renomeações, rótulos, conceitos, heurísticas, momentos, indeterminados, vermelhos.
+DECISOES = ("renomear_variavel", "rotular_equacao", "conceito", "heuristica", "momento_fechado",
+            "aceitar_indeterminado")
 RE_BLOCO = re.compile(r"<!-- bloco:regras-do-incerto:inicio \((?P<papel>dono|gerado)[^>]*-->\n(?P<miolo>.*?)"
                       r"<!-- bloco:regras-do-incerto:fim -->", re.S)
 RE_SCRIPT = re.compile(r"\b([a-z_]+\.py)\b")
@@ -138,10 +139,10 @@ class TesteSkillLavra(unittest.TestCase):
     def test_devolucao_lista_os_tipos_na_ordem(self):
         texto = ler(DEVOLUCAO)
         titulos = re.findall(r"^### (.*)$", texto, re.M)
-        self.assertEqual(len(titulos), 6, titulos)
+        self.assertEqual(len(titulos), 7, titulos)
         for titulo, tipo in zip(titulos, DECISOES):
             self.assertIn(f"`{tipo}`", titulo)
-        self.assertIn("Vermelhos", titulos[5])
+        self.assertIn("Vermelhos", titulos[6])
         self.assertRegex(texto, r"[Vv]ermelho nunca promove")
         self.assertIn("grafo-incerto.md", texto)
 
