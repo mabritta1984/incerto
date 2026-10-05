@@ -23,13 +23,17 @@ documentos e são pulados.
      `\\left\\{…\\right\\}`, lidas como `x`), `^{(…)}` (lido como potência), `_{(…)}` (estatística de ordem,
      `Z_{(i)}` lido como `Z_i`, outro símbolo: SCFT#363 dava R_n = 0) e `\\Delta` seguido de letra
      (`\\Delta x` lido como `Delta·x`);
-  2b. constantes (rodada de 05/10, onda 2026-10-TALEB-1): `\\pi` é a constante `pi` do SymPy, nunca símbolo
-     (`\\pi_A` segue o símbolo `pi_A`; `\\pi` sozinho num lado da relação, `\\pi = …`, é variável — SCFT eq.
-     20.1, a carteira — e perda `nao_suportado:\\pi_como_variavel`); `e` base de potência (`e^{…}`, `e^x`)
-     é o número de Euler (`exp(…)`);
-     `e` solto segue símbolo — a estação não tem como decidir. Rede de segurança: `Symbol('pi')` (de
-     `\\mathit{pi}`) ou `Symbol('e')` base de `Pow` (`\\frac{x}{e}`, `\\sqrt{e}`, `\\mathit{e}^{x}`) no resultado é
-     perda `nao_suportado:constante_como_simbolo:<pi|e>`;
+  2b. constantes (rodada de 05/10, onda 2026-10-TALEB-1; o corpus decide): `\\pi` é a constante `pi` do SymPy,
+     nunca símbolo (`\\pi_A` segue o símbolo `pi_A`) — salvo usado como variável (a carteira de SCFT eq. 20.1),
+     que é perda `nao_suportado:\\pi_como_variavel`, julgada no parse cru, antes da troca pela constante: π como
+     lado inteiro de relação (`\\pi = …`, `-\\pi = …`, `\\pi \\ge 0`, `\\pi = 3.14159`), termo direto de soma em
+     qualquer ponto (`\\pi + C`, `C - \\pi`), expressão derivada ou variável de derivação
+     (`\\frac{\\partial \\pi}{\\partial S}`); como fator, divisor ou argumento (`\\sqrt{2\\pi}`, `\\tanh(x/\\pi)`)
+     é a constante. `e` base de potência (`e^{…}`, `e^x`), não colado a letra, é o número de Euler (`exp(…)`);
+     `ne^{-n}` segue a conferência de símbolos (`simbolo_partido:ne`); `e^{T}`/`e^{\\top}` (transposta?) é perda
+     `nao_suportado:e^{T}`; `e` solto segue símbolo — a estação não tem como decidir. Rede de segurança (depois da
+     conferência de símbolos): `Symbol('pi')` (de `\\mathit{pi}`) ou `Symbol('e')` base de `Pow` (`\\frac{x}{e}`,
+     `\\sqrt{e}`, `\\mathit{e}^{x}`) no resultado é perda `nao_suportado:constante_como_simbolo:<pi|e>`;
   3. `sympy.parsing.latex.parse_latex(..., strict=True)`; erro é perda `strict`;
   4. conferência: todo símbolo e toda função do resultado têm de ser um token inteiro do LaTeX
      normalizado (`TC` lido como `T·C` é `simbolo_partido:TC`); símbolo com nome de comando LaTeX
@@ -121,8 +125,11 @@ _SEM_LEITURA = (
     (r"~", " "),
 )
 # `e` base de potência (`e^{x}`, `e^x`) é o número de Euler; os comandos (`\\le`, `\\varepsilon`) e o subscrito
-# (`x_e`) não são o `e`: o padrão os consome sem marcar
-_E_BASE = re.compile(r"\\[A-Za-z]+|_\s*[A-Za-z0-9]|(e)(?=\s*\^)")
+# (`x_e`) não são o `e`: o padrão os consome sem marcar; `e` colado a letra (`ne^{-n}`) também não é marcado e
+# segue para a conferência de símbolos (`simbolo_partido:ne`, decisão 2)
+_E_BASE = re.compile(r"\\[A-Za-z]+|_\s*[A-Za-z0-9]|(?<![A-Za-z])(e)(?=\s*\^)")
+# `e^{T}`, `e^{\\top}`: transposta ou expoente `T`? ambíguo, perda
+_E_TRANSPOSTA = re.compile(r"(?<![A-Za-z\\])e\s*\^\s*(?:\{\s*(?:T|\\top)\s*\}|T(?![A-Za-z0-9])|\\top(?![A-Za-z]))")
 _MARCA = "\ue000%d\ue001"
 _RE_MARCA = re.compile("\ue000(\\d+)\ue001")
 
@@ -242,6 +249,8 @@ def _preparar(latex):
         return None, [], "nao_suportado:%s" % m.group(0)
     if _relacoes_no_nivel_zero(t) > 1:
         return None, [], "nao_suportado:relacao_encadeada"
+    if _E_TRANSPOSTA.search(t):
+        return None, [], "nao_suportado:e^{T}"
     t = _E_BASE.sub(lambda m: marca("constante", "e") if m.group(1) else m.group(0), t)
     return t, marcas, None
 
@@ -381,6 +390,10 @@ def _parsear(latex, funcoes):
     if misto:
         return _perda("nao_suportado:uso_misto:%s" % misto[0])
 
+    # `\pi` usado como variável (a carteira de SCFT eq. 20.1) é perda; olhado ANTES da troca pela constante, que o
+    # SymPy avaliaria (`\pi \ge 0` vira `true`, `Derivative(pi, S)` não diz mais que π foi derivado)
+    if _pi_como_variavel(expr):
+        return _perda("nao_suportado:\\pi_como_variavel")
     # `\pi` é a constante π (o parser o lê `Symbol('pi')`; composto nenhum chega aqui com esse nome: os compostos
     # ainda têm o nome da marca); o `e` base de potência, marcado no pré-parse, é o número de Euler (`exp`)
     troca = {}
@@ -394,17 +407,6 @@ def _parsear(latex, funcoes):
             if novo != s.name:
                 troca[s] = Symbol(novo)
     expr = expr.xreplace(troca)
-    # `\pi` sozinho num lado da relação é o definiendum, uma variável (SCFT#528, eq. 20.1: π é a carteira
-    # replicante); lido como a constante seria "π = -C + S ∂C/∂S" — perda (decisão do PO, 05/10, opção A)
-    if isinstance(expr, Relational) and pi in expr.args:
-        return _perda("nao_suportado:\\pi_como_variavel")
-    # defesa em profundidade: o que sobrar como `Symbol('pi')` (`\mathit{pi}`) ou `Symbol('e')` base de potência
-    # (`\frac{x}{e}` é Pow(e, -1), `\sqrt{e}`, `\mathit{e}^{x}`) seria constante lida como símbolo, ou o
-    # contrário: perda
-    if Symbol("pi") in expr.atoms(Symbol):
-        return _perda("nao_suportado:constante_como_simbolo:pi")
-    if any(p.base == Symbol("e") for p in expr.atoms(Pow)):
-        return _perda("nao_suportado:constante_como_simbolo:e")
 
     def funcao_nova(f):
         nome = type(f).__name__
@@ -431,8 +433,34 @@ def _parsear(latex, funcoes):
             # o token que foi partido: contém o nome, mas não é o nome com um subscrito (`C` vem de `TC`, não de `C_i`)
             contem = sorted((k for k in tokens if nome in k and not k.startswith(nome + "_")), key=_bytes)
             return _perda("simbolo_partido:%s" % (contem[0] if contem else nome))
+    # defesa em profundidade: o que sobrar como `Symbol('pi')` (`\mathit{pi}`) ou `Symbol('e')` base de potência
+    # (`\frac{x}{e}` é Pow(e, -1), `\sqrt{e}`, `\mathit{e}^{x}`) seria constante lida como símbolo, ou o
+    # contrário: perda
+    if Symbol("pi") in expr.atoms(Symbol):
+        return _perda("nao_suportado:constante_como_simbolo:pi")
+    if any(p.base == Symbol("e") for p in expr.atoms(Pow)):
+        return _perda("nao_suportado:constante_como_simbolo:e")
     return {"ok": True, "srepr": srepr(expr), "motivo": None,
             "simbolos": sorted((s.name for s in expr.free_symbols), key=_bytes)}
+
+
+def _pi_como_variavel(expr):
+    """`\\pi` (o `Symbol('pi')` cru do parse) usado como variável, não como a constante (decisão de 05/10, opção A,
+    e revisão de 9f7d794): um lado inteiro de relação (`\\pi = …`, `-\\pi = …`, `\\pi \\ge 0`), termo direto de
+    soma (`\\pi + C`, `C - \\pi`), expressão derivada ou variável de derivação (`\\frac{\\partial \\pi}{\\partial S}`).
+    A constante do corpus só aparece como fator, divisor ou dentro de raiz, `tanh`, `exp`, …"""
+    from sympy import Add, Derivative, Symbol
+    from sympy.core.relational import Relational
+    p = Symbol("pi")
+    if not expr.has(p):             # `has`, não `free_symbols`: a variável de derivação não é símbolo livre
+        return False
+    def termo(x):
+        return x == p or x == -p
+    if isinstance(expr, Relational) and any(termo(lado) for lado in expr.args):
+        return True
+    if any(termo(d.expr) or p in d.variables for d in expr.atoms(Derivative)):
+        return True
+    return any(termo(t) for a in expr.atoms(Add) for t in a.args)
 
 
 # nome canônico de símbolo como o parse o produz: letras, com um subscrito opcional (`f`, `gamma`, `f_1`,

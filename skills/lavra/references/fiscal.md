@@ -127,8 +127,9 @@ mecânica e **preserva os nomes**:
 - **`\pi` é π e `e` base de potência é o número de Euler** (rodada de extração de 05/10, decidida pelo corpus
   e pelo Wolfram na onda 2026-10-TALEB-1): a extração grava `pi` e `exp(…)`/`E` no `srepr`, e o código usa
   `Pi`, `Exp[…]`/`E`. `e` solto (não base de potência) segue `Symbol('e')` → `e` minúsculo, símbolo comum;
-  `Symbol('pi')` não sai mais num candidato que parseia; `\pi` sozinho num lado da relação (`\pi = …`, a
-  carteira do SCFT eq. 20.1) é variável e a extração o dá como perda `nao_suportado:\pi_como_variavel`.
+  `Symbol('pi')` não sai mais num candidato que parseia; `\pi` usado como variável (lado de relação, termo
+  de soma, derivada — a carteira do SCFT eq. 20.1; regra exata no item 2b do `extrair_equacoes.py`) é perda
+  `nao_suportado:\pi_como_variavel`, e `e^{T}`/`e^{\top}` é perda `nao_suportado:e^{T}`.
   Nunca trocar símbolo por constante (ou o inverso) numa via só: o código segue o `srepr`.
 - **Reextração depois dessa rodada**: todo candidato cujo `srepr` mudou (os que tinham `Symbol('pi')` ou
   `Symbol('e')` base de potência, e o SCFT#363, agora perda `nao_suportado:_{(`) tem a prova Wolfram

@@ -272,7 +272,6 @@ class TesteConstantes(unittest.TestCase):
                  r"y = e^x": "Equality(Symbol('y'), exp(Symbol('x')))",
                  r"y = e^{2}": "Equality(Symbol('y'), exp(Integer(2)))",
                  r"y = n e^{-n}": "Equality(Symbol('y'), Mul(Symbol('n'), exp(Mul(Integer(-1), Symbol('n')))))",
-                 r"y = ne^{-n}": "Equality(Symbol('y'), Mul(Symbol('n'), exp(Mul(Integer(-1), Symbol('n')))))",
                  r"y \le e^{x}": "LessThan(Symbol('y'), exp(Symbol('x')))"}
         for latex, srepr in casos.items():
             r = parsear_latex(latex)
@@ -308,6 +307,40 @@ class TesteConstantes(unittest.TestCase):
             self.assertEqual(r["motivo"], "nao_suportado:\\pi_como_variavel", latex)
         for latex in (r"y = \pi x", r"y = 2\pi", r"\pi x = y"):
             self.assertTrue(parsear_latex(latex)["ok"], latex)
+
+    def test_pi_variavel_em_derivada_ou_termo_de_soma_e_perda(self):
+        # revisão de 9f7d794: π derivado, π como variável de derivação, π termo de soma (`\pi + C`, `-\pi`) e
+        # relação de π decidida pelo SymPy (`\pi \ge 0` → true) — é a carteira, nunca a constante
+        for latex in (r"\frac{\partial \pi}{\partial S} = -\frac{\partial C}{\partial S} + \Delta",
+                      r"\frac{\partial x}{\partial \pi} = 1", r"\pi + C = S", r"-\pi = C",
+                      r"y = C - \pi", r"y = 2 (x + \pi)", r"\pi \ge 0", r"\pi = 3.14159"):
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertIsNone(r["srepr"], latex)
+            self.assertEqual(r["motivo"], "nao_suportado:\\pi_como_variavel", latex)
+
+    def test_pi_constante_do_corpus_segue_parseando(self):
+        # fator, divisor, dentro de raiz/tanh/exp: os verdes da onda seguem ok, com `pi` constante
+        casos = ((r"P_H(t) = (h/\sqrt{2\pi t^3})\exp(-h^2/2t)", {"P_H"}),                               # DH#276
+                 (r"P_H(t) = (h/\sqrt{2\pi t^3})\exp(\lambda h - \lambda^2 t/2 - h^2/2t)", {"P_H"}),   # DH#277
+                 (r"\frac{\mathbb{E}(X^2)}{\mathbb{E}(|X|)} = \sqrt{\frac{\pi}{2}} \sigma", set()),       # SCFT#67
+                 (r"f(x) = \frac{1}{2}\tanh\left(\frac{\kappa x}{\pi}\right) + \frac{1}{2}", {"f"}),       # Convex#15
+                 (r"y = \sin(\pi x) + \exp(\pi)", set()), (r"y = x^{\pi} + 1", set()))
+        for latex, funcoes in casos:
+            r = parsear_latex(latex, frozenset(funcoes))
+            self.assertTrue(r["ok"], (latex, r["motivo"])); self.assertNotIn("pi", r["simbolos"], latex)
+            self.assertNotIn("Symbol('pi')", r["srepr"], latex)
+
+    def test_e_colado_a_letra_segue_simbolo_partido(self):
+        # decisão 2 (28/09): `ne` sem marcação não é `n·e` — o `e` grudado a letra não é marcado
+        for latex, motivo in ((r"y = ne^{-n}", "simbolo_partido:ne"), (r"y = Le^{x}", "simbolo_partido:Le")):
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertEqual(r["motivo"], motivo, latex)
+
+    def test_e_elevado_a_transposta_e_perda(self):
+        for latex in (r"y = e^{T}", r"y = e^T", r"y = e^{\top}", r"y = e^\top x", r"y = e^{ T }"):
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"], latex); self.assertEqual(r["motivo"], "nao_suportado:e^{T}", latex)
+        self.assertTrue(parsear_latex(r"y = e^{T t}")["ok"])
 
     def test_estatistica_de_ordem_e_perda_antes_do_parse(self):
         scft_363 = (r"\frac{n^{\frac{\alpha-1}{\alpha}}}{L_0(n)} \left( \frac{1}{n} \sum_{i=1}^n Z_{(i)} - \theta "
