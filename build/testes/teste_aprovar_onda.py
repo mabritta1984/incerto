@@ -159,6 +159,69 @@ class TesteGateEquacao(unittest.TestCase):
             self.assertIn("LaTeX:", vizinhas, item); self.assertIn("srepr:", vizinhas, item)
 
 
+def p4e(eq, veredito="verde", detalhe="d"):
+    return {"prova": "P4", "alvo": eq, "equacao": eq, "prova_wolfram": "equacao", "veredito": veredito,
+            "detalhe": detalhe}
+
+
+class TesteGateEquacaoWolfram(unittest.TestCase):
+    """Rodada corpus B: a P4 de equação (prova Wolfram `equacao`) pode reprovar uma equação que parseia."""
+    SAIDA = "Out[1]= (2*alpha)/(-1 + alpha)"
+
+    def eq(self, fiscal, decisoes=(), **extra):
+        return AO.decidir([eq_fixa("a", **extra)], [], [], fiscal, list(decisoes))["equacoes"][0]
+
+    def test_sem_prova_equacao_comportamento_de_hoje(self):
+        e = self.eq([p1("a")])
+        self.assertEqual((e["status"], e["verificado_por"]), ("aprovado", []))
+
+    def test_vermelho_fica_em_staging_citando_a_saida_wolfram(self):
+        e = self.eq([p1("a"), p4e("a", "vermelho", "equação — Wolfram vermelho: " + self.SAIDA)])
+        self.assertEqual((e["status"], e["verificado_por"]), ("staging", []))
+        self.assertTrue(any(self.SAIDA in p and p.startswith("P4 vermelho") for p in e["pendencias"]), e["pendencias"])
+        # vermelho nunca promove, nem com aceite
+        e = self.eq([p1("a"), p4e("a", "vermelho")], [aceite(prova="P4", equacao="a", prova_wolfram="equacao")])
+        self.assertEqual(e["status"], "staging")
+
+    def test_verde_ganha_wolfram_em_verificado_por(self):
+        e = self.eq([p1("a"), p4e("a")])
+        self.assertEqual((e["status"], e["verificado_por"], e["aceites_po"]), ("aprovado", ["wolfram"], []))
+        # P1 vermelho: staging, e staging não lista via
+        e = self.eq([p1("a", "vermelho"), p4e("a")])
+        self.assertEqual((e["status"], e["verificado_por"]), ("staging", []))
+
+    def test_indeterminado_so_com_aceite_exato(self):
+        fis = [p1("a"), p4e("a", "indeterminado")]
+        self.assertEqual(self.eq(fis)["status"], "staging")
+        # o aceite da forma do momento (sem prova_wolfram) não casa com a linha da equação
+        self.assertEqual(self.eq(fis, [aceite(prova="P4", equacao="a")])["status"], "staging")
+        e = self.eq(fis, [aceite(prova="P4", equacao="a", prova_wolfram="equacao")])
+        self.assertEqual((e["status"], e["verificado_por"], e["aceites_po"]), ("aprovado", [], ["P4"]))
+
+    def test_do_registro_ao_gate_caso_real_scft_268(self):
+        # o candidato real (P1 verde) com a prova Wolfram vermelha do gabarito: o fiscal de verdade a junta
+        e = cand("SCFT#268", r"\frac{p^*}{p} = \frac{\alpha}{1 - \alpha}")
+        w = {"prova": "equacao", "via": "wolfram", "equacao": "SCFT#268", "veredito": "vermelho",
+             "codigo": "FullSimplify[...]", "saida": self.SAIDA}
+        w["impressao"] = FI.impressao_esperada(("equacao", "SCFT#268"), [e], [])
+        fis = [{k: v for k, v in l.items() if k != "ms"} for l in FI.provas([e], [], [], {("equacao", "SCFT#268"): w})]
+        self.assertEqual([(l["prova"], l["veredito"]) for l in fis], [("P1", "verde"), ("P4", "vermelho")])
+        eq = AO.decidir([e], [], [], fis, [])["equacoes"][0]
+        self.assertEqual(eq["status"], "staging")
+        self.assertTrue(any(self.SAIDA in p for p in eq["pendencias"]), eq["pendencias"])
+        self.assertIn("e.verificado_por = l.verificado_por", AO.CYPHER_EQUACOES)
+
+    def test_momento_e_equacao_se_avaliam_separados(self):
+        m = {"media": "x"}
+        e = self.eq([p1("a"), p4e("a")], momento_fechado=m)
+        self.assertEqual(e["status"], "staging")                                   # falta a P4 do momento
+        self.assertIn("sem prova P4 do momento fechado", e["pendencias"])
+        e = self.eq([p1("a"), p4m("a"), p4e("a")], momento_fechado=m)
+        self.assertEqual((e["status"], e["verificado_por"]), ("aprovado", ["wolfram"]))
+        e = self.eq([p1("a"), p4m("a"), p4e("a", "vermelho")], momento_fechado=m)
+        self.assertEqual(e["status"], "staging")
+
+
 class TesteGateDerivacao(unittest.TestCase):
     def setUp(self):
         self.eqs = [eq_fixa("m"), eq_fixa("f")]

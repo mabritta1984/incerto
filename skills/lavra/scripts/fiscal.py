@@ -28,14 +28,19 @@ Provas (uma linha por prova; `prova`, `alvo`, `veredito` ∈ verde|vermelho|inde
                  P4); vias iguais → o veredito comum ("vias concordam"). Momento: não há via SymPy; a P4 tem o
                  veredito da prova Wolfram. Candidato SEM `momento_fechado` cujo `srepr` aplica `E` ou `Var`
                  (`aplica_momento`: `\\mathbb{E}[X] = …`, `\\operatorname{Var}(X) = …`) → indeterminado
-                 "aplica E/Var sem momento_fechado declarado" (afirma um momento que ninguém prova). Chaves
-                 estruturadas da P4: `mae`, `filha` (derivação) ou `equacao` (momento).
+                 "aplica E/Var sem momento_fechado declarado" (afirma um momento que ninguém prova).
+                 Equação (rodada corpus B): todo candidato com prova `{"prova": "equacao", "equacao", …}`
+                 registrada ganha uma P4 `{"equacao", "prova_wolfram": "equacao"}` com o veredito da prova e
+                 a `saida` verbatim no `detalhe` (desatualizada → vermelho "prova Wolfram desatualizada");
+                 sem essa prova, nenhuma linha (nada muda). Chaves estruturadas da P4: `mae`, `filha`
+                 (derivação), `equacao` (momento) ou `equacao` + `prova_wolfram` (equação).
 `provas_sympy` roda só P1–P3; `provas` roda a tabela `PROVAS` inteira (P1–P4), que é o que a CLI grava.
 
 `provas_wolfram(caminho)`: lê `provas-<onda>.jsonl` (ausente = nenhuma prova) e indexa por
-`chave_wolfram` — `("P2", mae, filha)` ou `("momento", equacao)`; toda linha traz `impressao` = sha256
-hex de `json.dumps(conteudo, sort_keys=True, ensure_ascii=False)`, com conteudo P2 `{"mae_srepr",
-"filha_srepr", "simbolo", "substituicao"}` e momento `{"equacao_srepr", "momento_fechado"}`
+`chave_wolfram` — `("P2", mae, filha)`, `("momento", equacao)` ou `("equacao", equacao)`; toda linha traz
+`impressao` = sha256 hex de `json.dumps(conteudo, sort_keys=True, ensure_ascii=False)`, com conteudo P2
+`{"mae_srepr", "filha_srepr", "simbolo", "substituicao"}`, momento `{"equacao_srepr", "momento_fechado"}`
+e equação `{"latex", "srepr"}`
 (`impressao_esperada`, dono único; `registrar_prova.py` a chama); linha malformada (chaves fora do
 formato, `via` ≠ wolfram, `prova` ou `veredito` desconhecidos) ou chave repetida → `ValueError` (a CLI
 sai com a mensagem): prova ambígua não é prova.
@@ -90,7 +95,7 @@ VERDE, VERMELHO, INDETERMINADO = "verde", "vermelho", "indeterminado"
 VEREDITOS = (VERDE, VERMELHO, INDETERMINADO)
 VIA_WOLFRAM = "wolfram"
 # `prova` de uma linha de `provas-<onda>.jsonl` → chaves que a identificam (e com que a P4 a junta à onda)
-CHAVES_WOLFRAM = {"P2": ("mae", "filha"), "momento": ("equacao",)}
+CHAVES_WOLFRAM = {"P2": ("mae", "filha"), "momento": ("equacao",), "equacao": ("equacao",)}
 # campos de toda linha de prova Wolfram, além das chaves; `impressao` amarra o veredito ao conteúdo provado
 CAMPOS_WOLFRAM = ("prova", "via", "codigo", "saida", "veredito", "impressao")
 
@@ -236,7 +241,8 @@ def _relacional_parseia(condicao, simbolos):
 # --- provas Wolfram registradas -----------------------------------------------------------------------
 
 def chave_wolfram(linha):
-    """`("P2", mae, filha)` ou `("momento", equacao)`: a identidade de uma prova Wolfram registrada."""
+    """`("P2", mae, filha)`, `("momento", equacao)` ou `("equacao", equacao)`: a identidade de uma prova
+    Wolfram registrada."""
     prova = linha.get("prova")
     if prova not in CHAVES_WOLFRAM:
         raise ValueError("prova Wolfram desconhecida: %r (use %s)" % (prova, " ou ".join(sorted(CHAVES_WOLFRAM))))
@@ -271,8 +277,9 @@ def impressao_esperada(chave, equacoes, derivacoes):
     """A `impressao` que a prova de `chave` tem de trazer para a onda como está agora.
 
     P2: `{"mae_srepr", "filha_srepr", "simbolo", "substituicao"}` da ÚNICA linha de `derivacoes` com essa
-    mãe e essa filha; momento: `{"equacao_srepr", "momento_fechado"}` do candidato. `ValueError` se a
-    derivação não existir ou for ambígua, se a equação for desconhecida ou se o momento não estiver declarado.
+    mãe e essa filha; momento: `{"equacao_srepr", "momento_fechado"}` do candidato; equação: `{"latex",
+    "srepr"}` do candidato. `ValueError` se a derivação não existir ou for ambígua, se a equação for
+    desconhecida ou se o momento não estiver declarado.
     """
     por_nome = {e["nome"]: e for e in equacoes}
     if chave[0] == "P2":
@@ -295,6 +302,11 @@ def impressao_esperada(chave, equacoes, derivacoes):
             raise ValueError("%s não declara momento_fechado" % nome)
         return impressao({"equacao_srepr": por_nome[nome].get("srepr"),
                           "momento_fechado": por_nome[nome]["momento_fechado"]})
+    if chave[0] == "equacao":
+        nome = chave[1]
+        if nome not in por_nome:
+            raise ValueError("equação desconhecida: %s" % nome)
+        return impressao({"latex": por_nome[nome].get("latex"), "srepr": por_nome[nome].get("srepr")})
     raise ValueError("prova Wolfram desconhecida: %r" % (chave[0],))
 
 
@@ -432,6 +444,19 @@ def _p4_duas_vias(ctx):
         else:
             yield dict(chaves, veredito=w["veredito"], detalhe="momento fechado %s — Wolfram %s: %s"
                        % (declarado, w["veredito"], w["saida"]))
+    # rodada corpus B: a equação que parseia ainda pode ser reprovada pela segunda via (o corpus decide)
+    for eq in ctx["equacoes"]:
+        nome = eq["nome"]
+        w = wolfram.get(("equacao", nome))
+        if w is None:
+            continue
+        chaves = {"alvo": nome, "equacao": nome, "prova_wolfram": "equacao"}
+        motivo = _desatualizada(w, ("equacao", nome), ctx)
+        if motivo:
+            yield dict(chaves, veredito=VERMELHO, detalhe=motivo)
+        else:
+            yield dict(chaves, veredito=w["veredito"], detalhe="equação %s — Wolfram %s: %s"
+                       % (eq.get("latex"), w["veredito"], w["saida"]))
 
 
 PROVAS_SYMPY = (("P1", _p1_parse), ("P2", _p2_derivacao), ("P3", _p3_validade))

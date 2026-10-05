@@ -199,5 +199,54 @@ class TesteRegistrar(unittest.TestCase):
         self.assertFalse(os.path.exists(self.arquivo))
 
 
+# Rodada corpus B (PO, 2026-10-05): SCFT#248 `\lim φ_K/K = α/(1−α)` parseia, mas o próprio corpus (Definição 10.1,
+# eq. 11.7) e o Wolfram dão α/(α−1). Código e saída reais do gabarito de `references/fiscal.md`.
+CODIGO_PHI = ("FullSimplify[Expectation[x \\[Conditioned] x > K, x \\[Distributed] ParetoDistribution[L, alpha], "
+              "Assumptions -> alpha > 1 && K > L > 0]/K - (alpha/(1 - alpha)), Assumptions -> alpha > 1 && K > L > 0]\n")
+SAIDA_PHI = ("Symbol::undefined2: Warning: Global symbols \"L, L, L\" are undefined.\n"
+             "General::messages: Messages were generated which may indicate errors.\n\n"
+             "Out[1]= (2*alpha)/(-1 + alpha)\n")
+PHI = {"nome": "SCFT#248", "latex": "\\lim_{K\\to\\infty} \\phi_K/K = \\frac{\\alpha}{1 - \\alpha}",
+       "srepr": "Equality(Symbol('phi_K'), Symbol('alpha'))"}
+
+
+class TesteProvaDeEquacao(unittest.TestCase):
+    onda, texto, rodar, linhas, momento = (TesteRegistrar.onda, TesteRegistrar.texto, TesteRegistrar.rodar,
+                                           TesteRegistrar.linhas, TesteRegistrar.momento)
+
+    def setUp(self):
+        TesteRegistrar.setUp(self)
+        self.onda("equacoes", EQUACOES + [PHI])
+
+    def equacao(self, nome="SCFT#248", veredito="vermelho", saida=SAIDA_PHI, *extra):
+        return self.rodar("--prova", "equacao", "--equacao", nome, "--codigo", self.texto("e.wl", CODIGO_PHI),
+                          "--saida", self.texto("e.txt", saida), "--veredito", veredito, *extra)
+
+    def test_registra_com_impressao_do_latex_e_do_srepr(self):
+        self.assertEqual(self.equacao(), 0)
+        linha = json.loads(self.linhas())
+        self.assertEqual(linha, {"prova": "equacao", "via": "wolfram", "equacao": "SCFT#248", "codigo": CODIGO_PHI,
+                                 "saida": SAIDA_PHI, "veredito": "vermelho",
+                                 "impressao": FI.impressao({"latex": PHI["latex"], "srepr": PHI["srepr"]})})
+        self.assertIn("\\[Conditioned]", self.linhas())                 # verbatim
+
+    def test_verde_conferido_e_chave_propria(self):
+        with self.assertRaises(SystemExit):
+            self.equacao("SCFT#248", "verde")                              # a saída não é 0
+        self.assertEqual(self.equacao("SCFT#248", "verde", "Out[1]= 0\n"), 0)
+        with self.assertRaises(SystemExit):
+            self.equacao("SCFT#248", "vermelho")                           # chave repetida
+        self.assertEqual(self.equacao("SCFT#248", "vermelho", SAIDA_PHI, "--substituir"), 0)
+        self.assertEqual(self.equacao("pareto#3"), 0)                      # momento e equação: chaves distintas
+        self.assertEqual(self.momento("pareto#3"), 0)
+        self.assertEqual(sorted(FI.provas_wolfram(self.arquivo)),
+                         [("equacao", "SCFT#248"), ("equacao", "pareto#3"), ("momento", "pareto#3")])
+
+    def test_equacao_desconhecida_e_recusada(self):
+        with self.assertRaises(SystemExit):
+            self.equacao("nada#7")
+        self.assertFalse(os.path.exists(self.arquivo))
+
+
 if __name__ == "__main__":
     unittest.main()

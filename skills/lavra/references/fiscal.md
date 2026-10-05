@@ -26,6 +26,13 @@ a prova Wolfram verde e concordante. Divergência entre as vias é vermelho, com
 |---|---|---|---|
 | derivação | toda linha P2 do `fiscal-<onda>.jsonl` (uma por linha de `derivacoes-<onda>.jsonl`) | `mae` + `filha` | `{"prova": "P2", "via": "wolfram", "mae", "filha", "codigo", "saida", "veredito", "impressao"}` |
 | momento fechado | todo candidato de `equacoes-<onda>.jsonl` com `momento_fechado` não vazio (dict, ex.: `{"media": "alpha*L/(alpha-1)"}`) | `equacao` (o `nome` do candidato) | `{"prova": "momento", "via": "wolfram", "equacao", "codigo", "saida", "veredito", "impressao"}` |
+| equação (opcional) | candidato que parseia (P1 verde) mas que o próprio corpus contradiz — outra passagem, definição ou equação numerada da fonte dá outro resultado | `equacao` (o `nome` do candidato) | `{"prova": "equacao", "via": "wolfram", "equacao", "codigo", "saida", "veredito", "impressao"}` |
+
+A prova `equacao` não é exigida de todo candidato: sem ela, nada muda. Registrada, o fiscal gera a P4 de
+equação (`{"prova": "P4", "equacao", "prova_wolfram": "equacao"}`) com o veredito dela, e a aprovação a lê:
+vermelha → a equação fica em staging com a pendência citando a saída Wolfram; verde → `verificado_por`
+da `:Equacao` ganha `wolfram`; indeterminado só passa com aceite exato
+(`{"tipo": "aceitar_indeterminado", "prova": "P4", "equacao", "prova_wolfram": "equacao"}`).
 
 Candidato **sem** `momento_fechado` cujo `srepr` aplica `E` ou `Var` (`\mathbb{E}[X] = …`,
 `\operatorname{Var}(X) = …`) afirma um momento que ninguém declarou: a P4 dá `indeterminado` "aplica E/Var
@@ -40,8 +47,8 @@ cujo código confere todas de uma vez (ver abaixo).
   a P4 dá vermelho em todas, e o registrador recusa. Desfaz-se na rodada, deixando uma só.
 - **`impressao` amarra o veredito ao que foi provado.** É o sha256 hex de
   `json.dumps(conteudo, sort_keys=True, ensure_ascii=False)`, com `conteudo` =
-  `{"mae_srepr", "filha_srepr", "simbolo", "substituicao"}` (derivação) ou
-  `{"equacao_srepr", "momento_fechado"}` (momento). O registrador a calcula de `equacoes-<onda>.jsonl` e
+  `{"mae_srepr", "filha_srepr", "simbolo", "substituicao"}` (derivação),
+  `{"equacao_srepr", "momento_fechado"}` (momento) ou `{"latex", "srepr"}` (equação). O registrador a calcula de `equacoes-<onda>.jsonl` e
   `derivacoes-<onda>.jsonl` (recusa derivação não declarada, equação desconhecida ou momento não
   declarado); a P4 a recalcula da onda atual. Se o candidato foi reextraído, o `momento_fechado` editado
   ou a substituição trocada depois do registro, a P4 dá vermelho **"prova Wolfram desatualizada"**: refazer
@@ -63,6 +70,8 @@ cujo código confere todas de uma vez (ver abaixo).
        python3 skills/lavra/scripts/registrar_prova.py --onda <onda> --prova P2 --mae <mãe> --filha <filha> \
                --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado
        python3 skills/lavra/scripts/registrar_prova.py --onda <onda> --prova momento --equacao <nome> \
+               --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado
+       python3 skills/lavra/scripts/registrar_prova.py --onda <onda> --prova equacao --equacao <nome> \
                --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado
 
    Chave já registrada é recusada; refazer uma prova exige `--substituir` (a linha antiga sai do arquivo).
@@ -145,6 +154,21 @@ devolvido sem avaliar, `Indeterminate`, `ConditionalExpression` ou erro → **in
 `Symbol::undefined`/`Symbol::undefined2` sobre parâmetros livres (`L`, `alpha`, …) é esperado e inofensivo —
 aparece mesmo com os parâmetros declarados nas `Assumptions` (ver o gabarito) — e não muda o veredito; é
 colado na saída como veio.
+
+### Equação (a própria)
+
+O corpus decide; o Wolfram confere. O código calcula, **pela definição que a própria fonte dá** (a
+distribuição, a definição numerada, a equação de que a afirmação depende — citadas no bloco de decisão), o
+lado que a equação afirma, e subtrai o lado direito do candidato, com `Assumptions` declarando todo
+parâmetro no domínio da fonte:
+
+    FullSimplify[(<o que a fonte define, calculado>) - (<lado direito do candidato>), Assumptions -> <domínio>]
+
+**Verde** sse a saída é exatamente `0`; diferença não nula → **vermelho** (a equação contradiz a fonte);
+`Expectation`/`Limit` devolvido sem avaliar, `Indeterminate`, `ConditionalExpression` ou erro →
+**indeterminado**. O código nunca é montado a partir do veredito esperado: a definição vem da fonte, o lado
+direito vem do `srepr` do candidato. A equação vermelha não é corrigida aqui: a saída vai ao PO no bloco de
+decisão (a extração ou o texto da fonte pode estar errado; quem decide é ele).
 
 ## Falso vermelho conhecido: `e^x` contra `\log`
 
@@ -258,3 +282,43 @@ Out[1]= ((-1 + Log[e])*Log[y])/Log[e]
 Diferença não nula: vermelho, concordante com o SymPy, e falso (ver "Falso vermelho conhecido"). Por causa
 do `Solve::ifun`, esta saída não é registrada como está: o agente roda a forma de todos os ramos e registra
 aquela.
+
+### `φ_K/K` de Pareto contra a própria fonte — SCFT#248 e SCFT#268 (equação vermelha; 05/10/2026)
+
+SCFT#248 `\lim_{K\to\infty} \phi_K/K = \frac{\alpha}{1 - \alpha}` (tópico "10.2.4 Test 2: Excess
+Conditional Expectation") e SCFT#268 `\frac{p^*}{p} = \frac{\alpha}{1 - \alpha}` (tópico "11.2.3
+Conflations") parseiam (P1 verde), mas a própria fonte (Definição 10.1 e eq. 11.7 do SCFT) dá, para a cauda
+de Pareto, `E[X | X > K]/K = α/(α−1)`. O código calcula essa razão pela distribuição e subtrai o lado
+direito do candidato.
+
+Código:
+
+```
+FullSimplify[Expectation[x \[Conditioned] x > K, x \[Distributed] ParetoDistribution[L, alpha], Assumptions -> alpha > 1 && K > L > 0]/K - (alpha/(1 - alpha)), Assumptions -> alpha > 1 && K > L > 0]
+```
+
+Saída:
+
+```
+Symbol::undefined2: Warning: Global symbols "L, L, L" are undefined.
+General::messages: Messages were generated which may indicate errors.
+
+Out[1]= (2*alpha)/(-1 + alpha)
+```
+
+Veredito: **vermelho** (diferença não nula: o candidato diz `α/(1−α)`, a fonte dá `α/(α−1)`). Registrado
+com `--prova equacao --equacao Statistical_Consequences_of_Fat_Tails.pdf.md#248 --veredito vermelho` (e o
+mesmo para `#268`), a equação fica em staging com essa saída na pendência.
+
+Conferência do lado da fonte (o mesmo código com `α/(α−1)` no lugar do lado direito):
+
+```
+FullSimplify[Expectation[x \[Conditioned] x > K, x \[Distributed] ParetoDistribution[L, alpha], Assumptions -> alpha > 1 && K > L > 0]/K - (alpha/(alpha - 1)), Assumptions -> alpha > 1 && K > L > 0]
+```
+
+```
+Symbol::undefined2: Warning: Global symbols "L, L, L" are undefined.
+General::messages: Messages were generated which may indicate errors.
+
+Out[1]= 0
+```

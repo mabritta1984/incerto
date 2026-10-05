@@ -11,7 +11,11 @@ grafo — nós, relações, chaves e o Cypher canônico de cada MERGE — é don
 Gate (`decidir`, função pura), item a item — TODAS as linhas do fiscal do item têm de passar:
   `:Equacao`    P1 verde; toda P3 sobre ela verde (e toda condição de `validades-` com sua P3); se tem
                 `momento_fechado` ou aplica `E`/`Var` (`fiscal.aplica_momento`), a P4 de momento verde (e
-                toda P4 de momento sobre ela, sempre); sem declaração, essa P4 é indeterminado.
+                toda P4 de momento sobre ela, sempre); sem declaração, essa P4 é indeterminado. Com prova
+                Wolfram `equacao` registrada (rodada corpus B), a P4 de equação também: vermelha → staging
+                com a pendência citando a saída Wolfram; verde → `verificado_por: ["wolfram"]`;
+                indeterminado só com aceite exato (`prova_wolfram: "equacao"` no aceite). Sem ela, nada
+                muda e `verificado_por` é `[]`.
   `DERIVA_DE`   a P2 da linha de derivação (mae, filha, simbolo, substituicao) E a P4 (mae, filha) verdes,
                 e as duas pontas promovíveis. `verificado_por` lista só as vias cuja linha deu verde
                 (`sympy@1.14.0` pela P2, `wolfram` pela P4); a linha que passou por aceite do PO vai em
@@ -34,7 +38,8 @@ ou decisão malformada recusa a execução (ValueError → saída com a mensagem
   conceito              {nome, tipo_conceito: fenomeno|principio|falacia|regime, definicao, sinonimos, fonte}
                         (`tipo` da linha é o tipo da decisão; o do conceito vai em `tipo_conceito`)
   heuristica            {nome, enunciado, condicao, fonte, sustenta: [nomes de conceito ou equação da onda]}
-  aceitar_indeterminado {prova, <chaves estruturadas da linha do fiscal>}
+  aceitar_indeterminado {prova, <chaves estruturadas da linha do fiscal>} (P4 de equação: `equacao` +
+                        `prova_wolfram: "equacao"`; só `equacao` é a P4 do momento)
   rotular_equacao       {equacao: "<documento>#<ordem>", rotulo: ^[a-z][a-z0-9_]*$} — grava `:Equacao.rotulo`
                         (o nome estável com que o relatório e o MCP a acham); uma equação, um rótulo; rótulo
                         repetido no plano, ou já em outra :Equacao do corpus, recusa antes de qualquer escrita.
@@ -71,9 +76,9 @@ VERDE, VERMELHO, INDETERMINADO = fiscal.VERDE, fiscal.VERMELHO, fiscal.INDETERMI
 VERIFICADO_POR = ("sympy@1.14.0", "wolfram")    # a via da P2 e a da P4, nessa ordem
 TIPOS_CONCEITO = ("fenomeno", "principio", "falacia", "regime")
 
-# chaves estruturadas de cada prova (as de `fiscal.py`); a P4 tem duas formas: derivação ou momento
+# chaves estruturadas de cada prova (as de `fiscal.py`); a P4 tem três formas: derivação, momento ou equação
 CHAVES_PROVA = {"P1": (("equacao",),), "P2": (("mae", "filha", "simbolo", "substituicao"),),
-                "P3": (("equacao", "condicao"),), "P4": (("mae", "filha"), ("equacao",))}
+                "P3": (("equacao", "condicao"),), "P4": (("mae", "filha"), ("equacao",), ("equacao", "prova_wolfram"))}
 
 # campos de cada tipo de decisão, além de `tipo` (aceitar_indeterminado é validado à parte)
 CAMPOS_DECISAO = {
@@ -113,7 +118,10 @@ def identidade(linha):
     if prova not in CHAVES_PROVA:
         raise ValueError("prova desconhecida: %r" % (prova,))
     formas = CHAVES_PROVA[prova]
-    chaves = formas[0] if len(formas) == 1 else (formas[0] if "mae" in linha else formas[1])
+    if len(formas) == 1 or "mae" in linha:
+        chaves = formas[0]
+    else:
+        chaves = formas[2] if "prova_wolfram" in linha else formas[1]
     return (prova,) + tuple((k, canonico(linha.get(k))) for k in chaves)
 
 
@@ -314,7 +322,8 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
     p3 = _indice(fiscal_linhas, "P3", "equacao", "condicao")
     p3_eq = _indice(fiscal_linhas, "P3", "equacao")
     p4d = _indice(fiscal_linhas, "P4", "mae", "filha")
-    p4m = _indice([l for l in fiscal_linhas if "mae" not in l], "P4", "equacao")
+    p4m = _indice([l for l in fiscal_linhas if "mae" not in l and "prova_wolfram" not in l], "P4", "equacao")
+    p4e = _indice([l for l in fiscal_linhas if "prova_wolfram" in l], "P4", "equacao")
 
     vistas = set()
     for v in validades:
@@ -345,14 +354,18 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
         # momento declarado, ou `E`/`Var` aplicado sem declaração (a P4 dá indeterminado): a P4 tem de existir
         if (e.get("momento_fechado") or fiscal.aplica_momento(e.get("srepr"))) and not p4m.get(k):
             pend.append("sem prova P4 do momento fechado")
-        mais, aceitas = _avaliar(p1.get(k, []) + p3_eq.get(k, []) + p4m.get(k, []), aceites)
+        mais, aceitas = _avaliar(p1.get(k, []) + p3_eq.get(k, []) + p4m.get(k, []) + p4e.get(k, []), aceites)
         pend += mais
         status_eq[nome] = STAGING if pend else APROVADO
+        # a P4 de equação (prova Wolfram `equacao`) verde verifica a equação; aceite do PO não é verificação
+        verificado = ["wolfram"] if status_eq[nome] == APROVADO and p4e.get(k) \
+            and all(l["veredito"] == VERDE for l in p4e[k]) else []
         plano_eq.append({"nome": nome, "latex": e.get("latex"), "sympy_srepr": e.get("srepr"), "forma": e.get("forma"),
                          "momento_fechado": c(e["momento_fechado"]) if e.get("momento_fechado") else None,
                          "hipoteses": None, "faixa_validade": conds, "onda": e.get("onda"), "ordem": e.get("ordem"),
                          "fonte": c(e["fonte"]), "status": status_eq[nome], "pendencias": pend, "aceites_po": aceitas,
-                         "rotulo": rotulos.get(nome), "funcoes_aplicadas": funcoes_aplicadas(e)})
+                         "rotulo": rotulos.get(nome), "funcoes_aplicadas": funcoes_aplicadas(e),
+                         "verificado_por": verificado})
 
     # variáveis: USA, DEFINIDA_POR
     usa, definida, variaveis = [], [], {}
@@ -529,7 +542,7 @@ MERGE (e:Equacao {corpus: $corpus, nome: l.nome})
 SET e.latex = l.latex, e.sympy_srepr = l.sympy_srepr, e.forma = l.forma, e.momento_fechado = l.momento_fechado,
     e.hipoteses = l.hipoteses, e.faixa_validade = l.faixa_validade, e.onda = l.onda, e.ordem = l.ordem,
     e.status = l.status, e.fonte = l.fonte, e.pendencias = l.pendencias, e.aceites_po = l.aceites_po,
-    e.rotulo = l.rotulo
+    e.rotulo = l.rotulo, e.verificado_por = l.verificado_por
 """
 
 CYPHER_VARIAVEIS = """

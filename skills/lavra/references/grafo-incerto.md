@@ -35,7 +35,7 @@ pelo portão do PO dos `conferidos/`, não pelo fiscal. `:Documento` é criado p
 |---|---|---|---|
 | `:Documento` | `{corpus, nome}` | `status` (sempre `'aprovado'`), `fonte` (`{"documento": nome, "topico": null}`) | ingestão (chave); aprovação (`status`, `fonte`) |
 | `:Trecho` | `{corpus, documento, topico, parte}` | `texto` (verbatim), `onda`, `ordem`, `embedding_gemini`, `junta`, `cabecalho` | ingestão |
-| `:Equacao` | `{corpus, nome}` | `latex`, `sympy_srepr`, `forma` (`algebrica`\|`funcional`\|`perda`), `momento_fechado` (JSON ou ausente), `hipoteses`, `faixa_validade` (lista das condições declaradas em `validades-`), `onda`, `ordem`, `status`, `fonte`, `pendencias`, `aceites_po`, `rotulo` (decisão `rotular_equacao`; único no corpus; ausente sem decisão) | aprovação |
+| `:Equacao` | `{corpus, nome}` | `latex`, `sympy_srepr`, `forma` (`algebrica`\|`funcional`\|`perda`), `momento_fechado` (JSON ou ausente), `hipoteses`, `faixa_validade` (lista das condições declaradas em `validades-`), `onda`, `ordem`, `status`, `fonte`, `pendencias`, `aceites_po`, `rotulo` (decisão `rotular_equacao`; único no corpus; ausente sem decisão), `verificado_por` (`["wolfram"]` só se aprovada com a P4 de equação verde; `[]` sem prova `equacao`, em staging ou por aceite do PO) | aprovação |
 | `:Variavel` | `{corpus, nome}` | `simbolo`, `tipo` (`variavel`\|`parametro`\|`constante`), `status`, `fonte` | aprovação |
 | `:Conceito` | `{corpus, nome}` | `tipo` (`fenomeno`\|`principio`\|`falacia`\|`regime`), `definicao`, `sinonimos` (lista), `onda`, `status`, `fonte` | aprovação (decisão `conceito`) |
 | `:Heuristica` | `{corpus, nome}` | `enunciado`, `condicao`, `onda`, `status`, `fonte` | aprovação (decisão `heuristica`) |
@@ -96,7 +96,7 @@ nunca passa, com ou sem decisão. Item sem linha do fiscal fica em staging ("sem
 
 | Item | Linhas que contam (todas) | Linha que tem de existir |
 |---|---|---|
-| `:Equacao` | P1 `{equacao}`; toda P3 `{equacao, condicao}` sobre ela; toda P4 de momento `{equacao}` sobre ela | P1; uma P3 por condição de `validades-`; P4 de momento se tem `momento_fechado` **ou** se o `srepr` aplica `E`/`Var` |
+| `:Equacao` | P1 `{equacao}`; toda P3 `{equacao, condicao}` sobre ela; toda P4 de momento `{equacao}` sobre ela; toda P4 de equação `{equacao, prova_wolfram: "equacao"}` sobre ela | P1; uma P3 por condição de `validades-`; P4 de momento se tem `momento_fechado` **ou** se o `srepr` aplica `E`/`Var` (a P4 de equação só existe com prova Wolfram `equacao` registrada) |
 | `DERIVA_DE` | P2 `{mae, filha, simbolo, substituicao}` da linha de derivação; P4 `{mae, filha}` | as duas; e mãe e filha aprovadas |
 | `VALIDA_SOB` | P3 `{equacao, condicao}` | a P3; e a equação aprovada |
 
@@ -204,7 +204,7 @@ MERGE (e:Equacao {corpus: $corpus, nome: l.nome})
 SET e.latex = l.latex, e.sympy_srepr = l.sympy_srepr, e.forma = l.forma, e.momento_fechado = l.momento_fechado,
     e.hipoteses = l.hipoteses, e.faixa_validade = l.faixa_validade, e.onda = l.onda, e.ordem = l.ordem,
     e.status = l.status, e.fonte = l.fonte, e.pendencias = l.pendencias, e.aceites_po = l.aceites_po,
-    e.rotulo = l.rotulo
+    e.rotulo = l.rotulo, e.verificado_por = l.verificado_por
 
 UNWIND $linhas AS l
 MERGE (v:Variavel {corpus: $corpus, nome: l.nome})

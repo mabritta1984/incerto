@@ -159,7 +159,11 @@ saída **verbatim** em `_esteira/incerto/wolfram-<onda>/` e registre:
 ```
 python3 skills/lavra/scripts/registrar_prova.py --onda <onda> --prova P2 --mae <mãe> --filha <filha> --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado
 python3 skills/lavra/scripts/registrar_prova.py --onda <onda> --prova momento --equacao <nome> --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado
+python3 skills/lavra/scripts/registrar_prova.py --onda <onda> --prova equacao --equacao <nome> --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado
 ```
+
+A prova `equacao` é a da própria equação que parseia mas que o corpus contradiz (outra passagem do mesmo
+documento dá outro resultado): a P4 de equação vermelha a deixa em staging (gabarito em `references/fiscal.md`).
 
 (`--substituir` só para refazer uma prova desatualizada.) Depois, o fiscal de novo, agora com a P4 juntando
 as duas vias (as provas vêm de `_esteira/incerto/provas-<onda>.jsonl`; `--provas-wolfram <jsonl>` só se foram

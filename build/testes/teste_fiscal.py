@@ -409,6 +409,68 @@ class TesteP4(unittest.TestCase):
         self.assertEqual([l["prova"] for l in provas_sympy(eqs, self.ders, vals)], ["P1"] * 3 + ["P2", "P3"])
 
 
+def wolfram_equacao(equacao, veredito, saida="Out[1]= 0", onda=None):
+    return _com_impressao({"prova": "equacao", "via": "wolfram", "equacao": equacao, "veredito": veredito,
+                           "saida": saida, "codigo": "FullSimplify[...]"}, onda)
+
+
+# Rodada corpus B: SCFT#248 / SCFT#268 dizem α/(1−α); o corpus (Definição 10.1, eq. 11.7) e o Wolfram, α/(α−1)
+SAIDA_PHI = ("Symbol::undefined2: Warning: Global symbols \"L, L, L\" are undefined.\n"
+             "General::messages: Messages were generated which may indicate errors.\n\n"
+             "Out[1]= (2*alpha)/(-1 + alpha)")
+
+
+class TesteP4Equacao(unittest.TestCase):
+    """P4 por equação: a prova `equacao` registrada dá o veredito da segunda via sobre a equação que parseia."""
+    cand = TesteP4.cand
+
+    def setUp(self):
+        self.eqs = [self.cand("SCFT#268", r"\frac{p^*}{p} = \frac{\alpha}{1 - \alpha}"),
+                    self.cand("pareto#3", r"m = \frac{\alpha L}{\alpha - 1}", momento_fechado={"media": "alpha*L/(alpha-1)"})]
+
+    def p4e(self, linhas):
+        return [l for l in linhas if l["prova"] == "P4" and l.get("prova_wolfram") == "equacao"]
+
+    def test_sem_prova_equacao_nada_muda(self):
+        self.assertEqual(self.p4e(provas(self.eqs, [], [], {})), [])
+
+    def test_vermelho_com_a_saida_wolfram_verbatim(self):
+        linhas = provas(self.eqs, [], [], indice(wolfram_equacao("SCFT#268", "vermelho", SAIDA_PHI, (self.eqs, []))))
+        self.assertEqual([l["veredito"] for l in linhas if l["prova"] == "P1"], ["verde", "verde"])   # parseia
+        p4 = self.p4e(linhas)
+        self.assertEqual([(l["alvo"], l["equacao"], l["veredito"]) for l in p4], [("SCFT#268", "SCFT#268", "vermelho")])
+        self.assertIn(SAIDA_PHI, p4[0]["detalhe"])
+        self.assertEqual(sorted(p4[0]), ["alvo", "detalhe", "equacao", "ms", "prova", "prova_wolfram", "veredito"])
+
+    def test_verde_e_indeterminado_seguem_a_prova(self):
+        for v in ("verde", "indeterminado"):
+            p4 = self.p4e(provas(self.eqs, [], [], indice(wolfram_equacao("SCFT#268", v, "Out[1]= 0", (self.eqs, [])))))
+            self.assertEqual([l["veredito"] for l in p4], [v])
+
+    def test_momento_e_equacao_sao_linhas_distintas(self):
+        w = indice(wolfram_momento("pareto#3", "verde", "Out[1]= 0", (self.eqs, [])),
+                   wolfram_equacao("pareto#3", "verde", "Out[1]= 0", (self.eqs, [])))
+        p4 = [l for l in provas(self.eqs, [], [], w) if l["prova"] == "P4"]
+        self.assertEqual([(l["equacao"], l.get("prova_wolfram"), l["veredito"]) for l in p4],
+                         [("pareto#3", None, "verde"), ("pareto#3", "equacao", "verde")])
+
+    def test_desatualizada_quando_latex_ou_srepr_mudam(self):
+        w = indice(wolfram_equacao("SCFT#268", "verde", "Out[1]= 0", (self.eqs, [])))
+        self.assertEqual([l["veredito"] for l in self.p4e(provas(self.eqs, [], [], w))], ["verde"])
+        for campo, valor in (("latex", r"\frac{p^*}{p} = \frac{\alpha}{\alpha - 1}"), ("srepr", "Symbol('x')")):
+            mudada = [dict(self.eqs[0], **{campo: valor}), self.eqs[1]]
+            p4 = self.p4e(provas(mudada, [], [], w))
+            self.assertEqual([l["veredito"] for l in p4], ["vermelho"], campo)
+            self.assertIn("prova Wolfram desatualizada", p4[0]["detalhe"])
+
+    def test_impressao_da_equacao_e_latex_mais_srepr(self):
+        e = self.eqs[0]
+        self.assertEqual(FI.impressao_esperada(("equacao", "SCFT#268"), self.eqs, []),
+                         FI.impressao({"latex": e["latex"], "srepr": e["srepr"]}))
+        with self.assertRaises(ValueError):
+            FI.impressao_esperada(("equacao", "nada#1"), self.eqs, [])
+
+
 class TesteProvasWolfram(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

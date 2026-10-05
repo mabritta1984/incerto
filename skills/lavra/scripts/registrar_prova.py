@@ -11,16 +11,20 @@ e gravados como estão.
 Linhas (uma por prova, `json.dumps(sort_keys=True, ensure_ascii=False)`, `newline="\\n"`, sem timestamp):
   derivação       {"prova": "P2", "via": "wolfram", "mae", "filha", "codigo", "saida", "veredito", "impressao"}
   momento fechado {"prova": "momento", "via": "wolfram", "equacao", "codigo", "saida", "veredito", "impressao"}
+  equação         {"prova": "equacao", "via": "wolfram", "equacao", "codigo", "saida", "veredito", "impressao"}
+                  (rodada corpus B: a segunda via confere a própria equação contra o que o corpus dá — a P4
+                  pode reprovar uma equação que parseia)
 `veredito` ∈ verde|vermelho|indeterminado, decidido pelo agente segundo `references/fiscal.md` — mas verde é
 conferido: só entra se a última linha `Out[n]=` da saída for exatamente `0` ou uma lista só de `0`
 (`{0, 0}`); saída sem `Out[n]=` ou com outro resultado recusa o verde. Vermelho e indeterminado
 entram como o agente os decidiu.
 `impressao` amarra o veredito ao conteúdo provado: é `fiscal.impressao_esperada` (dono único) calculada de
-`<raiz-esteira>/equacoes-<onda>.jsonl` e `derivacoes-<onda>.jsonl` no momento do registro; derivação não
-declarada (ou declarada mais de uma vez), equação desconhecida ou momento não declarado → recusa. Se o
+`<raiz-esteira>/equacoes-<onda>.jsonl` e `derivacoes-<onda>.jsonl` no momento do registro (na prova de
+equação, o `latex` + `srepr` do candidato); derivação não declarada (ou declarada mais de uma vez), equação
+desconhecida ou momento não declarado → recusa. Se o
 conteúdo mudar depois, a P4 dá "prova Wolfram desatualizada" e a prova tem de ser refeita.
 
-A chave de uma prova é `prova` + `mae` + `filha` (P2) ou `prova` + `equacao` (momento) — as mesmas com
+A chave de uma prova é `prova` + `mae` + `filha` (P2) ou `prova` + `equacao` (momento, equação) — as mesmas com
 que a P4 a junta à onda. Chave já registrada é recusada; com `--substituir`, o arquivo é reescrito sem a
 linha antiga e a nova vai para o fim (as demais mantêm a ordem). Gravação atômica.
 
@@ -28,6 +32,8 @@ Uso:
   python3 registrar_prova.py --onda <onda> --prova P2 --mae <nome> --filha <nome> \\
           --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado [--substituir]
   python3 registrar_prova.py --onda <onda> --prova momento --equacao <nome> \\
+          --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado [--substituir]
+  python3 registrar_prova.py --onda <onda> --prova equacao --equacao <nome> \\
           --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado [--substituir]
 Arquivo: `<raiz-esteira>/provas-<onda>.jsonl` (padrão `_esteira/incerto`), ou `--provas-wolfram <jsonl>`.
 Só biblioteca padrão; formato e chaves vêm do `fiscal.py` (vizinho, importado sem `sympy`).
@@ -109,7 +115,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--onda", required=True)
     ap.add_argument("--prova", required=True, choices=sorted(fiscal.CHAVES_WOLFRAM),
-                    help="P2 (derivação: --mae e --filha) ou momento (momento fechado: --equacao)")
+                    help="P2 (derivação: --mae e --filha), momento (momento fechado: --equacao) ou "
+                         "equacao (a própria equação: --equacao)")
     ap.add_argument("--mae")
     ap.add_argument("--filha")
     ap.add_argument("--equacao")
