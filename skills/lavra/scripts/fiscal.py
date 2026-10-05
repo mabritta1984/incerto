@@ -19,7 +19,10 @@ Provas (uma linha por prova; `prova`, `alvo`, `veredito` ∈ verde|vermelho|inde
                  `references/fiscal.md`). Para toda linha P2 (chave `mae` + `filha`; `alvo` = filha) exige a
                  prova Wolfram `{"prova": "P2", "mae", "filha", …}`; para todo candidato com `momento_fechado`
                  não vazio (`alvo` = `equacao` = nome) exige `{"prova": "momento", "equacao", …}`. Sem prova →
-                 vermelho "sem prova Wolfram". Derivação: veredito Wolfram ≠ veredito SymPy → vermelho "vias
+                 vermelho "sem prova Wolfram". Mãe + filha repetida em mais de uma linha P2 → vermelho
+                 "derivação ambígua para a prova Wolfram" em todas elas. `impressao` da prova ≠
+                 `impressao_esperada` (sha256 do conteúdo provado, recalculado da onda atual) → vermelho "prova
+                 Wolfram desatualizada". Derivação: veredito Wolfram ≠ veredito SymPy → vermelho "vias
                  divergem", com o `detalhe` da P2 e a `saida` Wolfram verbatim no `detalhe` (SymPy
                  indeterminado + Wolfram verde também diverge: indeterminado é pauta do PO na Task 11, não da
                  P4); vias iguais → o veredito comum ("vias concordam"). Momento: não há via SymPy; a P4 tem o
@@ -28,7 +31,10 @@ Provas (uma linha por prova; `prova`, `alvo`, `veredito` ∈ verde|vermelho|inde
 `provas_sympy` roda só P1–P3; `provas` roda a tabela `PROVAS` inteira (P1–P4), que é o que a CLI grava.
 
 `provas_wolfram(caminho)`: lê `provas-<onda>.jsonl` (ausente = nenhuma prova) e indexa por
-`chave_wolfram` — `("P2", mae, filha)` ou `("momento", equacao)`; linha malformada (chaves fora do
+`chave_wolfram` — `("P2", mae, filha)` ou `("momento", equacao)`; toda linha traz `impressao` = sha256
+hex de `json.dumps(conteudo, sort_keys=True, ensure_ascii=False)`, com conteudo P2 `{"mae_srepr",
+"filha_srepr", "simbolo", "substituicao"}` e momento `{"equacao_srepr", "momento_fechado"}`
+(`impressao_esperada`, dono único; `registrar_prova.py` a chama); linha malformada (chaves fora do
 formato, `via` ≠ wolfram, `prova` ou `veredito` desconhecidos) ou chave repetida → `ValueError` (a CLI
 sai com a mensagem): prova ambígua não é prova.
 
@@ -61,6 +67,7 @@ seja determinístico). `derivacoes-`/`validades-` ausentes = nenhuma declaraçã
 """
 import argparse
 import ast
+import hashlib
 import io
 import json
 import os
@@ -75,6 +82,8 @@ VEREDITOS = (VERDE, VERMELHO, INDETERMINADO)
 VIA_WOLFRAM = "wolfram"
 # `prova` de uma linha de `provas-<onda>.jsonl` → chaves que a identificam (e com que a P4 a junta à onda)
 CHAVES_WOLFRAM = {"P2": ("mae", "filha"), "momento": ("equacao",)}
+# campos de toda linha de prova Wolfram, além das chaves; `impressao` amarra o veredito ao conteúdo provado
+CAMPOS_WOLFRAM = ("prova", "via", "codigo", "saida", "veredito", "impressao")
 
 
 def _ordenado(exprs):
@@ -209,7 +218,7 @@ def validar_prova_wolfram(linha):
     if not isinstance(linha, dict):
         raise ValueError("linha não é objeto JSON")
     chave_wolfram(linha)
-    esperadas = {"prova", "via", "codigo", "saida", "veredito"} | set(CHAVES_WOLFRAM[linha["prova"]])
+    esperadas = set(CAMPOS_WOLFRAM) | set(CHAVES_WOLFRAM[linha["prova"]])
     if set(linha) != esperadas:
         raise ValueError("chaves %s; esperadas %s" % (sorted(linha), sorted(esperadas)))
     if linha["via"] != VIA_WOLFRAM:
@@ -219,6 +228,44 @@ def validar_prova_wolfram(linha):
     for k in esperadas - {"prova", "via", "veredito"}:
         if not isinstance(linha[k], str) or not linha[k].strip():
             raise ValueError("`%s` vazio ou não texto" % k)
+    if len(linha["impressao"]) != 64 or set(linha["impressao"]) - set("0123456789abcdef"):
+        raise ValueError("`impressao` não é sha256 hex: %r" % linha["impressao"])
+
+
+def impressao(conteudo):
+    """sha256 hex de `json.dumps(conteudo, sort_keys=True, ensure_ascii=False)`."""
+    return hashlib.sha256(json.dumps(conteudo, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def impressao_esperada(chave, equacoes, derivacoes):
+    """A `impressao` que a prova de `chave` tem de trazer para a onda como está agora.
+
+    P2: `{"mae_srepr", "filha_srepr", "simbolo", "substituicao"}` da ÚNICA linha de `derivacoes` com essa
+    mãe e essa filha; momento: `{"equacao_srepr", "momento_fechado"}` do candidato. `ValueError` se a
+    derivação não existir ou for ambígua, se a equação for desconhecida ou se o momento não estiver declarado.
+    """
+    por_nome = {e["nome"]: e for e in equacoes}
+    if chave[0] == "P2":
+        _, mae, filha = chave
+        ds = [d for d in derivacoes if (d.get("mae"), d.get("filha")) == (mae, filha)]
+        if not ds:
+            raise ValueError("derivação de %s a %s não declarada em derivacoes-" % (mae, filha))
+        if len(ds) > 1:
+            raise ValueError("derivação ambígua de %s a %s (%d linhas)" % (mae, filha, len(ds)))
+        desconhecidas = [n for n in (mae, filha) if n not in por_nome]
+        if desconhecidas:
+            raise ValueError("equação desconhecida: %s" % ", ".join(str(n) for n in desconhecidas))
+        return impressao({"mae_srepr": por_nome[mae].get("srepr"), "filha_srepr": por_nome[filha].get("srepr"),
+                          "simbolo": ds[0].get("alvo"), "substituicao": ds[0].get("substituicao") or {}})
+    if chave[0] == "momento":
+        nome = chave[1]
+        if nome not in por_nome:
+            raise ValueError("equação desconhecida: %s" % nome)
+        if not por_nome[nome].get("momento_fechado"):
+            raise ValueError("%s não declara momento_fechado" % nome)
+        return impressao({"equacao_srepr": por_nome[nome].get("srepr"),
+                          "momento_fechado": por_nome[nome]["momento_fechado"]})
+    raise ValueError("prova Wolfram desconhecida: %r" % (chave[0],))
 
 
 def provas_wolfram(caminho):
@@ -285,14 +332,38 @@ def _p3_validade(ctx):
                    % condicao)
 
 
+def _desatualizada(w, chave, ctx):
+    """Motivo pelo qual a prova `w` não vale para a onda como está agora, ou None."""
+    try:
+        esperada = impressao_esperada(chave, ctx["equacoes"], ctx["derivacoes"])
+    except ValueError as e:
+        return "prova Wolfram desatualizada (%s)" % e
+    if w["impressao"] != esperada:
+        return "prova Wolfram desatualizada: o conteúdo provado mudou desde o registro (impressao %s… ≠ %s…)" % (
+            w["impressao"][:12], esperada[:12])
+    return None
+
+
 def _p4_duas_vias(ctx):
     wolfram = ctx["wolfram"]
-    for p2 in [l for l in ctx["linhas"] if l["prova"] == "P2"]:
+    p2s = [l for l in ctx["linhas"] if l["prova"] == "P2"]
+    ocorrencias = {}
+    for l in p2s:
+        ocorrencias[(l["mae"], l["filha"])] = ocorrencias.get((l["mae"], l["filha"]), 0) + 1
+    for p2 in p2s:
         mae, filha = p2["mae"], p2["filha"]
         chaves = {"alvo": filha, "mae": mae, "filha": filha}
+        if ocorrencias[(mae, filha)] > 1:
+            # a prova é chaveada por mãe + filha: com duas derivações iguais nisso, uma prova validaria as duas
+            yield dict(chaves, veredito=VERMELHO, detalhe="derivação ambígua para a prova Wolfram: %d derivações "
+                       "de %s a %s na onda" % (ocorrencias[(mae, filha)], mae, filha))
+            continue
         w = wolfram.get(("P2", mae, filha))
+        motivo = w and _desatualizada(w, ("P2", mae, filha), ctx)
         if w is None:
             yield dict(chaves, veredito=VERMELHO, detalhe="sem prova Wolfram para a derivação de %s a %s" % (mae, filha))
+        elif motivo:
+            yield dict(chaves, veredito=VERMELHO, detalhe=motivo)
         elif w["veredito"] != p2["veredito"]:
             yield dict(chaves, veredito=VERMELHO, detalhe="vias divergem — SymPy %s: %s — Wolfram %s: %s"
                        % (p2["veredito"], p2["detalhe"], w["veredito"], w["saida"]))
@@ -307,8 +378,11 @@ def _p4_duas_vias(ctx):
         chaves = {"alvo": nome, "equacao": nome}
         declarado = json.dumps(momento, sort_keys=True, ensure_ascii=False)
         w = wolfram.get(("momento", nome))
+        motivo = w and _desatualizada(w, ("momento", nome), ctx)
         if w is None:
             yield dict(chaves, veredito=VERMELHO, detalhe="sem prova Wolfram para o momento fechado %s" % declarado)
+        elif motivo:
+            yield dict(chaves, veredito=VERMELHO, detalhe=motivo)
         else:
             yield dict(chaves, veredito=w["veredito"], detalhe="momento fechado %s — Wolfram %s: %s"
                        % (declarado, w["veredito"], w["saida"]))
@@ -370,7 +444,7 @@ def jsonl(linhas):
                    for l in linhas)
 
 
-def _ler_jsonl(caminho, obrigatorio=False):
+def ler_jsonl(caminho, obrigatorio=False):
     if not os.path.exists(caminho):
         if obrigatorio:
             sys.exit("não existe %s — rode `extrair_equacoes.py` antes" % caminho)
@@ -404,12 +478,12 @@ def main(argv=None):
     def arquivo(prefixo, ext="jsonl"):
         return os.path.join(args.raiz_esteira, "%s-%s.%s" % (prefixo, args.onda, ext))
 
-    equacoes = _ler_jsonl(arquivo("equacoes"), obrigatorio=True)
+    equacoes = ler_jsonl(arquivo("equacoes"), obrigatorio=True)
     try:
         wolfram = provas_wolfram(args.provas_wolfram or arquivo("provas"))
     except ValueError as e:
         sys.exit("provas Wolfram inválidas — %s" % e)
-    linhas = provas(equacoes, _ler_jsonl(arquivo("derivacoes")), _ler_jsonl(arquivo("validades")), wolfram)
+    linhas = provas(equacoes, ler_jsonl(arquivo("derivacoes")), ler_jsonl(arquivo("validades")), wolfram)
     caminho_md = args.relatorio or arquivo("fiscal", "md")
     _gravar(caminho_md, relatorio(args.onda, linhas))
     _gravar(arquivo("fiscal"), jsonl(linhas))

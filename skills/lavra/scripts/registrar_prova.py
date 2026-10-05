@@ -9,9 +9,13 @@ e chama este script. Código e saída são lidos **verbatim** (sem tradução de
 e gravados como estão.
 
 Linhas (uma por prova, `json.dumps(sort_keys=True, ensure_ascii=False)`, `newline="\\n"`, sem timestamp):
-  derivação       {"prova": "P2", "via": "wolfram", "mae", "filha", "codigo", "saida", "veredito"}
-  momento fechado {"prova": "momento", "via": "wolfram", "equacao", "codigo", "saida", "veredito"}
+  derivação       {"prova": "P2", "via": "wolfram", "mae", "filha", "codigo", "saida", "veredito", "impressao"}
+  momento fechado {"prova": "momento", "via": "wolfram", "equacao", "codigo", "saida", "veredito", "impressao"}
 `veredito` ∈ verde|vermelho|indeterminado, decidido pelo agente segundo `references/fiscal.md`.
+`impressao` amarra o veredito ao conteúdo provado: é `fiscal.impressao_esperada` (dono único) calculada de
+`<raiz-esteira>/equacoes-<onda>.jsonl` e `derivacoes-<onda>.jsonl` no momento do registro; derivação não
+declarada (ou declarada mais de uma vez), equação desconhecida ou momento não declarado → recusa. Se o
+conteúdo mudar depois, a P4 dá "prova Wolfram desatualizada" e a prova tem de ser refeita.
 
 A chave de uma prova é `prova` + `mae` + `filha` (P2) ou `prova` + `equacao` (momento) — as mesmas com
 que a P4 a junta à onda. Chave já registrada é recusada; com `--substituir`, o arquivo é reescrito sem a
@@ -103,6 +107,14 @@ def main(argv=None):
     linha = {"prova": args.prova, "via": args.via, "veredito": args.veredito,
              "codigo": _ler_verbatim(args.codigo, "codigo"), "saida": _ler_verbatim(args.saida, "saida")}
     linha.update({k: getattr(args, k) for k in proprias})
+
+    def onda(prefixo):
+        return os.path.join(args.raiz_esteira, "%s-%s.jsonl" % (prefixo, args.onda))
+    try:
+        linha["impressao"] = fiscal.impressao_esperada(fiscal.chave_wolfram(linha), fiscal.ler_jsonl(onda("equacoes"), True),
+                                                       fiscal.ler_jsonl(onda("derivacoes")))
+    except ValueError as e:
+        sys.exit("não registrado — %s" % e)
     caminho = args.provas_wolfram or os.path.join(args.raiz_esteira, "provas-%s.jsonl" % args.onda)
     try:
         registrar(caminho, linha, args.substituir)

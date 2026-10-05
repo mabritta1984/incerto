@@ -15,11 +15,23 @@ a prova Wolfram verde e concordante. Divergência entre as vias é vermelho, com
 
 | O quê | De onde vem | Chave da prova | Linha em `provas-<onda>.jsonl` |
 |---|---|---|---|
-| derivação | toda linha P2 do `fiscal-<onda>.jsonl` (uma por linha de `derivacoes-<onda>.jsonl`) | `mae` + `filha` | `{"prova": "P2", "via": "wolfram", "mae", "filha", "codigo", "saida", "veredito"}` |
-| momento fechado | todo candidato de `equacoes-<onda>.jsonl` com `momento_fechado` não vazio (dict, ex.: `{"media": "alpha*L/(alpha-1)"}`) | `equacao` (o `nome` do candidato) | `{"prova": "momento", "via": "wolfram", "equacao", "codigo", "saida", "veredito"}` |
+| derivação | toda linha P2 do `fiscal-<onda>.jsonl` (uma por linha de `derivacoes-<onda>.jsonl`) | `mae` + `filha` | `{"prova": "P2", "via": "wolfram", "mae", "filha", "codigo", "saida", "veredito", "impressao"}` |
+| momento fechado | todo candidato de `equacoes-<onda>.jsonl` com `momento_fechado` não vazio (dict, ex.: `{"media": "alpha*L/(alpha-1)"}`) | `equacao` (o `nome` do candidato) | `{"prova": "momento", "via": "wolfram", "equacao", "codigo", "saida", "veredito", "impressao"}` |
 
 Uma prova por chave. Um momento fechado com várias entradas (`media`, `variancia`, …) tem **uma** prova,
 cujo código confere todas de uma vez (ver abaixo).
+
+- **Mãe + filha é a chave da derivação.** Duas linhas de `derivacoes-<onda>.jsonl` com a mesma mãe e a
+  mesma filha (por exemplo, com substituições diferentes) são **derivação ambígua para a prova Wolfram**:
+  a P4 dá vermelho em todas, e o registrador recusa. Desfaz-se na rodada, deixando uma só.
+- **`impressao` amarra o veredito ao que foi provado.** É o sha256 hex de
+  `json.dumps(conteudo, sort_keys=True, ensure_ascii=False)`, com `conteudo` =
+  `{"mae_srepr", "filha_srepr", "simbolo", "substituicao"}` (derivação) ou
+  `{"equacao_srepr", "momento_fechado"}` (momento). O registrador a calcula de `equacoes-<onda>.jsonl` e
+  `derivacoes-<onda>.jsonl` (recusa derivação não declarada, equação desconhecida ou momento não
+  declarado); a P4 a recalcula da onda atual. Se o candidato foi reextraído, o `momento_fechado` editado
+  ou a substituição trocada depois do registro, a P4 dá vermelho **"prova Wolfram desatualizada"**: refazer
+  a prova e registrar com `--substituir`.
 
 ## Rito
 
@@ -100,11 +112,9 @@ escolhido nunca vira verde por uma das vias.
 
 O código calcula o momento pela distribuição declarada na fonte e subtrai o fechado declarado, com
 `Assumptions` declarando **todo** parâmetro (o domínio que a fonte dá para a distribuição e para a
-existência do momento). Uma entrada:
+existência do momento). Uma entrada (é o código do gabarito, em uma linha):
 
-    FullSimplify[Expectation[x, x \[Distributed] ParetoDistribution[L, alpha],
-                   Assumptions -> alpha > 1 && L > 0] - (alpha*L/(alpha - 1)),
-                 Assumptions -> alpha > 1 && L > 0]
+    FullSimplify[Expectation[x, x \[Distributed] ParetoDistribution[L, alpha], Assumptions -> alpha > 1 && L > 0] - (alpha L/(alpha - 1)), Assumptions -> alpha > 1 && L > 0]
 
 Várias entradas do `momento_fechado` (média, variância, k-ésimo momento): uma lista, em ordem de chave do
 dict, com `Mean[d]`/`Expectation`, `Variance[d]` ou `Moment[d, k]`:
@@ -113,20 +123,26 @@ dict, com `Mean[d]`/`Expectation`, `Variance[d]` ou `Moment[d, k]`:
       FullSimplify[{Mean[d] - (<media>), Variance[d] - (<variancia>)}, Assumptions -> alpha > 2 && L > 0]]
 
 **Verde** sse a saída é `0` (ou a lista inteira de `0`); diferença não nula → **vermelho**; `Expectation`
-devolvido sem avaliar, `Indeterminate`, `ConditionalExpression` ou erro → **indeterminado**. Avisos como
-`Symbol::undefined` sobre um parâmetro livre não mudam o veredito (e são colados na saída como vieram);
-declarar o parâmetro nas `Assumptions` os evita.
+devolvido sem avaliar, `Indeterminate`, `ConditionalExpression` ou erro → **indeterminado**. O aviso
+`Symbol::undefined`/`Symbol::undefined2` sobre parâmetros livres (`L`, `alpha`, …) é esperado e inofensivo —
+aparece mesmo com os parâmetros declarados nas `Assumptions` (ver o gabarito) — e não muda o veredito; é
+colado na saída como veio.
 
 ## Falso vermelho conhecido: `e^x` contra `\log`
 
 Com `e` símbolo comum, a mãe `y = e^{x}` dá `x = log(y)/log(e)` nas duas vias; a filha `x = \log y` (log
 natural, `log(y, E)` no `srepr`) não bate: o SymPy dá vermelho ("a mãe dá x = log(y)/log(e); a filha diz
-x = log(y)") e o código Wolfram com `e` símbolo também não dá `0`. É vermelho concordante e é **falso**: a
-inversão vale para o número de Euler. Não se conserta trocando `e` por `E` só no Wolfram; registra-se a
-saída como veio e o caso vai ao PO no bloco de decisão da rodada (renomear `e` como constante é decisão
-dele).
+x = log(y)") e o código Wolfram com `e` símbolo também não dá `0` (gabarito abaixo:
+`((-1 + Log[e])*Log[y])/Log[e]`). É vermelho concordante e é **falso**: a inversão vale para o número de
+Euler. Não se conserta trocando `e` por `E` só no Wolfram; registra-se a saída como veio e o caso vai ao PO
+no bloco de decisão da rodada (renomear `e` como constante é decisão dele).
 
-## Gabarito (rodado pelo MCP Wolfram em 04/10/2026, saídas verbatim)
+O gabarito rodou com `First@Solve` e emitiu `Solve::ifun`. Pela regra da mãe com mais de uma solução
+(acima), `Solve::ifun` obriga o agente a **rodar de novo na forma de todos os ramos**
+(`Simplify[(Log[y]) - (x /. Solve[y - (e^x) == 0, x])]`) antes de registrar, e é essa a prova registrada.
+Com `e` símbolo comum o resultado é o mesmo falso vermelho conhecido de qualquer forma.
+
+## Gabarito (rodado pelo MCP Wolfram em 04/10 e 05/10/2026, saídas verbatim)
 
 ### Kelly — filha correta (verde)
 
@@ -180,5 +196,47 @@ Out[1]= (alpha*L)/(-1 + alpha)
 ```
 
 O aviso sobre `L` é inofensivo (parâmetro livre). A saída é a média fechada `alpha*L/(alpha-1)`; a prova
-registrada é a forma com a diferença acima (`FullSimplify[Expectation[…] - (alpha*L/(alpha - 1)), …]`,
-com `L > 0` nas `Assumptions`), verde sse a saída for `0`.
+registrada é a forma com a diferença, abaixo.
+
+### Pareto — média, forma com a diferença (a prova registrada; 05/10/2026)
+
+Código:
+
+```
+FullSimplify[Expectation[x, x \[Distributed] ParetoDistribution[L, alpha], Assumptions -> alpha > 1 && L > 0] - (alpha L/(alpha - 1)), Assumptions -> alpha > 1 && L > 0]
+```
+
+Saída:
+
+```
+Symbol::undefined2: Warning: Global symbols "L, L, L, L" are undefined.
+General::messages: Messages were generated which may indicate errors.
+
+Out[1]= 0
+```
+
+Veredito: **verde** (saída `0`; o aviso sobre `L` aparece mesmo com `L > 0` nas `Assumptions` e é
+inofensivo).
+
+### `e^x` contra `\log` com `e` símbolo comum — falso vermelho conhecido (05/10/2026)
+
+Mãe `y = e^{x}`, filha `x = \log y`, símbolo `x`.
+
+Código:
+
+```
+Simplify[(Log[y]) - (x /. First@Solve[y - (e^x) == 0, x])]
+```
+
+Saída:
+
+```
+Solve::ifun: Inverse functions are being used by Solve, so some solutions may not be found; use Reduce for complete solution information.
+General::messages: Messages were generated which may indicate errors.
+
+Out[1]= ((-1 + Log[e])*Log[y])/Log[e]
+```
+
+Diferença não nula: vermelho, concordante com o SymPy, e falso (ver "Falso vermelho conhecido"). Por causa
+do `Solve::ifun`, esta saída não é registrada como está: o agente roda a forma de todos os ramos e registra
+aquela.

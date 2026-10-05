@@ -4,6 +4,7 @@ de validade); e a segunda via, P4: toda derivação e todo momento fechado exige
 e concordante. Os `srepr` saem do parser real da Task 8, para que o fiscal seja testado sobre exatamente
 o que a extração produz."""
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -178,14 +179,23 @@ SAIDA_ZERO = "Out[1]= 0"
 SAIDA_ERRADA = "Out[1]= ((-1 + b^2)*(-1 + p))/b"
 
 
-def wolfram_p2(mae, filha, veredito, saida=SAIDA_ZERO):
-    return {"prova": "P2", "via": "wolfram", "mae": mae, "filha": filha, "veredito": veredito, "saida": saida,
-            "codigo": "Simplify[...]"}
+SEM_IMPRESSAO = "0" * 64
 
 
-def wolfram_momento(equacao, veredito, saida="Out[1]= 0"):
-    return {"prova": "momento", "via": "wolfram", "equacao": equacao, "veredito": veredito, "saida": saida,
-            "codigo": "FullSimplify[...]"}
+def _com_impressao(linha, onda):
+    """`onda` = (equacoes, derivacoes): a impressão que o registrador gravaria; sem onda, uma qualquer."""
+    linha["impressao"] = FI.impressao_esperada(FI.chave_wolfram(linha), *onda) if onda else SEM_IMPRESSAO
+    return linha
+
+
+def wolfram_p2(mae, filha, veredito, saida=SAIDA_ZERO, onda=None):
+    return _com_impressao({"prova": "P2", "via": "wolfram", "mae": mae, "filha": filha, "veredito": veredito,
+                           "saida": saida, "codigo": "Simplify[...]"}, onda)
+
+
+def wolfram_momento(equacao, veredito, saida="Out[1]= 0", onda=None):
+    return _com_impressao({"prova": "momento", "via": "wolfram", "equacao": equacao, "veredito": veredito,
+                           "saida": saida, "codigo": "FullSimplify[...]"}, onda)
 
 
 def indice(*linhas):
@@ -216,7 +226,8 @@ class TesteP4(unittest.TestCase):
         self.assertIn("sem prova Wolfram", p4["detalhe"])
 
     def test_p4_vias_divergem_e_vermelho_com_as_duas_saidas(self):
-        linhas = provas(self.eqs, self.ders, [], indice(wolfram_p2("kelly#1", "kelly#2", "vermelho", SAIDA_ERRADA)))
+        linhas = provas(self.eqs, self.ders, [], indice(wolfram_p2("kelly#1", "kelly#2", "vermelho", SAIDA_ERRADA,
+                                                                       (self.eqs, self.ders))))
         p2 = [l for l in linhas if l["prova"] == "P2"][0]
         p4 = self.p4(linhas)[0]
         self.assertEqual((p2["veredito"], p4["veredito"]), ("verde", "vermelho"))
@@ -225,7 +236,7 @@ class TesteP4(unittest.TestCase):
         self.assertIn(SAIDA_ERRADA, p4["detalhe"])           # e a da via Wolfram, verbatim
 
     def test_p4_vias_concordam_e_verde(self):
-        p4 = self.p4(provas(self.eqs, self.ders, [], indice(wolfram_p2("kelly#1", "kelly#2", "verde"))))[0]
+        p4 = self.p4(provas(self.eqs, self.ders, [], indice(wolfram_p2("kelly#1", "kelly#2", "verde", onda=(self.eqs, self.ders)))))[0]
         self.assertEqual(p4["veredito"], "verde")
         self.assertIn("vias concordam", p4["detalhe"]); self.assertIn(SAIDA_ZERO, p4["detalhe"])
         self.assertEqual(sorted(p4), ["alvo", "detalhe", "filha", "mae", "ms", "prova", "veredito"])
@@ -233,14 +244,15 @@ class TesteP4(unittest.TestCase):
     def test_p4_sympy_indeterminado_e_wolfram_verde_divergem(self):
         eqs = [self.cand("q#1", "y = x^{2}"), self.cand("q#2", r"x = \sqrt{y}")]
         ders = [{"filha": "q#2", "mae": "q#1", "alvo": "x", "substituicao": {}}]
-        linhas = provas(eqs, ders, [], indice(wolfram_p2("q#1", "q#2", "verde")))
+        linhas = provas(eqs, ders, [], indice(wolfram_p2("q#1", "q#2", "verde", onda=(eqs, ders))))
         self.assertEqual([l["veredito"] for l in linhas if l["prova"] in ("P2", "P4")], ["indeterminado", "vermelho"])
         self.assertIn("vias divergem", self.p4(linhas)[0]["detalhe"])
 
     def test_p4_vias_que_concordam_no_vermelho_seguem_vermelho(self):
         eqs = self.eqs + [self.cand("kelly#3", r"f = p - (1 - p) b")]
         ders = [{"filha": "kelly#3", "mae": "kelly#1", "alvo": "f", "substituicao": {}}]
-        p4 = self.p4(provas(eqs, ders, [], indice(wolfram_p2("kelly#1", "kelly#3", "vermelho", SAIDA_ERRADA))))[0]
+        p4 = self.p4(provas(eqs, ders, [], indice(wolfram_p2("kelly#1", "kelly#3", "vermelho", SAIDA_ERRADA,
+                                                                        (eqs, ders)))))[0]
         self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("vias concordam", p4["detalhe"])
 
     def test_momento_pareto_exige_wolfram(self):
@@ -251,12 +263,50 @@ class TesteP4(unittest.TestCase):
         self.assertEqual([(l["alvo"], l["equacao"], l["veredito"]) for l in p4], [("pareto#3", "pareto#3", "vermelho")])
         self.assertIn("sem prova Wolfram", p4[0]["detalhe"])
         saida = "Out[1]= 0"
-        p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", "verde", saida))))
+        p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", "verde", saida, (eqs, [])))))
         self.assertEqual(p4[0]["veredito"], "verde"); self.assertIn(saida, p4[0]["detalhe"])
         self.assertEqual(sorted(p4[0]), ["alvo", "detalhe", "equacao", "ms", "prova", "veredito"])
         for v in ("vermelho", "indeterminado"):
-            p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", v, "Out[1]= alpha"))))
+            p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", v, "Out[1]= alpha", (eqs, [])))))
             self.assertEqual(p4[0]["veredito"], v); self.assertIn("Out[1]= alpha", p4[0]["detalhe"])
+
+    def test_p4_mae_e_filha_repetidas_sao_derivacao_ambigua_em_todas(self):
+        ders = self.ders + [dict(self.ders[0], substituicao={"b": "2"})]
+        w = wolfram_p2("kelly#1", "kelly#2", "verde", onda=(self.eqs, self.ders))   # válida para a primeira
+        p4 = self.p4(provas(self.eqs, ders, [], indice(w)))
+        self.assertEqual([l["veredito"] for l in p4], ["vermelho", "vermelho"])
+        for l in p4:
+            self.assertIn("derivação ambígua para a prova Wolfram", l["detalhe"])
+        self.assertEqual([l["veredito"] for l in self.p4(provas(self.eqs, ders, [], {}))], ["vermelho", "vermelho"])
+
+    def test_p2_desatualizada_depois_de_mudar_o_srepr_e_vermelho(self):
+        w = wolfram_p2("kelly#1", "kelly#2", "verde", onda=(self.eqs, self.ders))
+        self.assertEqual(self.p4(provas(self.eqs, self.ders, [], indice(w)))[0]["veredito"], "verde")
+        reextraida = [self.eqs[0], self.cand("kelly#2", r"f = p - \frac{1 - p}{b} + 0 \cdot q")]
+        self.assertNotEqual(reextraida[1]["srepr"], self.eqs[1]["srepr"])
+        p4 = self.p4(provas(reextraida, self.ders, [], indice(w)))[0]
+        self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("prova Wolfram desatualizada", p4["detalhe"])
+        # trocar a substituição declarada também desatualiza
+        p4 = self.p4(provas(self.eqs, [dict(self.ders[0], substituicao={"q": "1"})], [], indice(w)))[0]
+        self.assertIn("prova Wolfram desatualizada", p4["detalhe"])
+
+    def test_momento_desatualizado_depois_de_editar_o_momento_fechado_e_vermelho(self):
+        eqs = [self.cand("pareto#3", r"m = \frac{\alpha L}{\alpha - 1}", momento_fechado={"media": "alpha*L/(alpha-1)"})]
+        w = wolfram_momento("pareto#3", "verde", "Out[1]= 0", (eqs, []))
+        self.assertEqual(self.p4(provas(eqs, [], [], indice(w)))[0]["veredito"], "verde")
+        editada = [dict(eqs[0], momento_fechado={"media": "alpha*L/(alpha-2)"})]
+        p4 = self.p4(provas(editada, [], [], indice(w)))[0]
+        self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("prova Wolfram desatualizada", p4["detalhe"])
+
+    def test_impressao_e_sha256_do_conteudo_declarado(self):
+        conteudo = {"mae_srepr": self.eqs[0]["srepr"], "filha_srepr": self.eqs[1]["srepr"], "simbolo": "f",
+                    "substituicao": {}}
+        self.assertEqual(FI.impressao_esperada(("P2", "kelly#1", "kelly#2"), self.eqs, self.ders),
+                         hashlib.sha256(json.dumps(conteudo, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest())
+        for chave, ders in ((("P2", "kelly#2", "kelly#1"), self.ders), (("P2", "kelly#1", "kelly#2"), self.ders * 2),
+                            (("momento", "kelly#1"), self.ders), (("momento", "nada#1"), self.ders)):
+            with self.assertRaises(ValueError, msg=chave):
+                FI.impressao_esperada(chave, self.eqs, ders)
 
     def test_p4_vem_depois_de_p1_p2_p3_e_provas_sympy_nao_muda(self):
         eqs = self.eqs + [self.cand("pareto#3", "m = L", momento_fechado={"media": "L"})]
@@ -289,6 +339,8 @@ class TesteProvasWolfram(unittest.TestCase):
                        [dict(wolfram_p2("a#1", "a#2", "verde"), via="sympy")],
                        [dict(wolfram_p2("a#1", "a#2", "verde"), prova="P5")],
                        [dict(wolfram_momento("p#3", "verde"), veredito="talvez")],
+                       [dict(wolfram_momento("p#3", "verde"), impressao="abc")],
+                       [{k: v for k, v in wolfram_momento("p#3", "verde").items() if k != "impressao"}],
                        [{"prova": "P2", "via": "wolfram", "mae": "a#1", "veredito": "verde", "saida": "0"}]):
             self.escrever(linhas)
             with self.assertRaises(ValueError, msg=linhas):
@@ -319,6 +371,10 @@ class TesteCli(unittest.TestCase):
             {"nome": "r#2", "latex": "S = M/R", "srepr": s["srepr"], "simbolos": s["simbolos"], "motivo": None},
             {"nome": "r#3", "latex": r"\Pr(X > x) | y", "srepr": None, "simbolos": [], "motivo": r"nao_suportado:\Pr"}])
         self.escrever("derivacoes", [{"filha": "r#2", "mae": "r#1", "alvo": "S", "substituicao": {}, "passo": "isola S"}])
+        self.onda = (self.ler_linhas("equacoes"), self.ler_linhas("derivacoes"))
+
+    def ler_linhas(self, prefixo):
+        return [json.loads(l) for l in self.ler("%s-%s.jsonl" % (prefixo, ONDA)).splitlines()]
 
     def test_relatorio_tem_coluna_ms(self):
         self.preparar()
@@ -360,12 +416,12 @@ class TesteCli(unittest.TestCase):
         self.preparar()
         self.rodar("--provas-wolfram", os.path.join(self.tmp, "nao-existe.jsonl"))
         self.assertIn("sem prova Wolfram", self.p4_do_jsonl()[0]["detalhe"])
-        self.escrever("provas", [wolfram_p2("r#1", "r#2", "verde")])          # <raiz>/provas-<onda>.jsonl
+        self.escrever("provas", [wolfram_p2("r#1", "r#2", "verde", onda=self.onda)])   # <raiz>/provas-<onda>.jsonl
         self.rodar()
         self.assertEqual(self.p4_do_jsonl()[0]["veredito"], "verde")
         outro = os.path.join(self.tmp, "outro.jsonl")
         with io.open(outro, "w", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps(wolfram_p2("r#1", "r#2", "vermelho", SAIDA_ERRADA), sort_keys=True) + "\n")
+            f.write(json.dumps(wolfram_p2("r#1", "r#2", "vermelho", SAIDA_ERRADA, self.onda), sort_keys=True) + "\n")
         self.rodar("--provas-wolfram", outro)
         p4 = self.p4_do_jsonl()[0]
         self.assertEqual(p4["veredito"], "vermelho"); self.assertIn("vias divergem", p4["detalhe"])

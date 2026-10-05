@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Task 10: registrar_prova.py — a prova Wolfram que o agente rodou pelo MCP vira uma linha de
-`provas-<onda>.jsonl`, com código e saída verbatim, chaves ordenadas e sem timestamp; chave repetida é
-recusada sem `--substituir`."""
+`provas-<onda>.jsonl`, com código e saída verbatim, chaves ordenadas, sem timestamp e com a `impressao` do
+conteúdo provado; chave repetida é recusada sem `--substituir`; derivação ou momento não declarados na
+onda também."""
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -13,7 +15,7 @@ import unittest
 from _carga import carregar
 
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))
-sys.modules.setdefault("fiscal", carregar("skills/lavra/scripts/fiscal.py"))   # vizinho do import local
+FI = sys.modules.setdefault("fiscal", carregar("skills/lavra/scripts/fiscal.py"))   # vizinho do import local
 RP = carregar("skills/lavra/scripts/registrar_prova.py")
 
 ONDA = "2026-10-T10"
@@ -22,6 +24,14 @@ SAIDA_KELLY = "Out[1]= 0\n"
 CODIGO_PARETO = ("Expectation[x, x \\[Distributed] ParetoDistribution[L, alpha], "
                  "Assumptions -> alpha > 1 && L > 0]\n")
 SAIDA_PARETO = "Symbol::undefined: Warning: Global symbol L is undefined.\n\nOut[1]= (alpha*L)/(-1 + alpha)\n"
+# o registrador não parseia os srepr: só os imprime na `impressao`
+EQUACOES = [{"nome": n, "srepr": "Symbol('%s')" % n.replace("#", "")} for n in
+            ("kelly#1", "kelly#2", "kelly#3", "kelly#9", "a#1", "a#2")] + [
+           {"nome": "pareto#3", "srepr": "Symbol('m')", "momento_fechado": {"media": "alpha*L/(alpha-1)"}},
+           {"nome": "pareto#4", "srepr": "Symbol('m')", "momento_fechado": {"media": "L"}},
+           {"nome": "sem#5", "srepr": "Symbol('m')"}]
+DERIVACOES = [{"mae": "kelly#1", "filha": f, "alvo": "f", "substituicao": {}} for f in ("kelly#2", "kelly#3", "kelly#9")] \
+    + [{"mae": "a#1", "filha": "a#2", "alvo": "S", "substituicao": {"M": "k*S**2"}}]
 
 
 class TesteRegistrar(unittest.TestCase):
@@ -29,6 +39,12 @@ class TesteRegistrar(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp)
         self.arquivo = os.path.join(self.tmp, "provas-%s.jsonl" % ONDA)
+        self.onda("equacoes", EQUACOES)
+        self.onda("derivacoes", DERIVACOES)
+
+    def onda(self, prefixo, linhas):
+        with io.open(os.path.join(self.tmp, "%s-%s.jsonl" % (prefixo, ONDA)), "w", encoding="utf-8", newline="\n") as f:
+            f.writelines(json.dumps(l, sort_keys=True) + "\n" for l in linhas)
 
     def texto(self, nome, conteudo):
         caminho = os.path.join(self.tmp, nome)
@@ -64,10 +80,16 @@ class TesteRegistrar(unittest.TestCase):
         for l in brutas:
             self.assertEqual(l, json.dumps(json.loads(l), sort_keys=True, ensure_ascii=False))
         p2, mom = (json.loads(l) for l in brutas)
-        self.assertEqual(p2, {"prova": "P2", "via": "wolfram", "mae": "kelly#1", "filha": "kelly#2",
+        imp_p2 = FI.impressao({"mae_srepr": "Symbol('kelly1')", "filha_srepr": "Symbol('kelly2')", "simbolo": "f",
+                               "substituicao": {}})
+        imp_mom = FI.impressao({"equacao_srepr": "Symbol('m')", "momento_fechado": {"media": "alpha*L/(alpha-1)"}})
+        self.assertEqual(p2, {"prova": "P2", "via": "wolfram", "mae": "kelly#1", "filha": "kelly#2", "impressao": imp_p2,
                               "codigo": CODIGO_KELLY, "saida": SAIDA_KELLY, "veredito": "verde"})
-        self.assertEqual(mom, {"prova": "momento", "via": "wolfram", "equacao": "pareto#3",
+        self.assertEqual(mom, {"prova": "momento", "via": "wolfram", "equacao": "pareto#3", "impressao": imp_mom,
                                "codigo": CODIGO_PARETO, "saida": SAIDA_PARETO, "veredito": "verde"})
+        self.assertEqual(imp_mom, hashlib.sha256(json.dumps(
+            {"equacao_srepr": "Symbol('m')", "momento_fechado": {"media": "alpha*L/(alpha-1)"}},
+            sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest())
         self.assertIn("\\[Distributed]", brutas[1])           # código verbatim, nada reescrito
 
     def test_mesma_sequencia_da_os_mesmos_bytes(self):
@@ -111,6 +133,26 @@ class TesteRegistrar(unittest.TestCase):
         self.assertFalse(os.path.exists(self.arquivo))
         with io.open(outro, encoding="utf-8") as f:
             self.assertEqual(json.loads(f.read())["equacao"], "pareto#3")
+
+    def test_o_que_a_onda_nao_declara_nao_se_registra(self):
+        for args in (("kelly#2", "kelly#1"),                 # derivação não declarada (invertida)
+                     ("kelly#1", "nada#7")):
+            with self.assertRaises(SystemExit, msg=args):
+                self.p2(*args)
+        with self.assertRaises(SystemExit):
+            self.momento("sem#5")                             # equação sem momento_fechado
+        with self.assertRaises(SystemExit):
+            self.momento("nada#7")                            # equação desconhecida
+        self.onda("derivacoes", DERIVACOES + [dict(DERIVACOES[0], substituicao={"b": "2"})])
+        with self.assertRaises(SystemExit):
+            self.p2()                                         # derivação ambígua: mesma mãe e filha duas vezes
+        self.onda("derivacoes", [dict(DERIVACOES[0], mae="kelly#1", filha="nada#7")])
+        with self.assertRaises(SystemExit):
+            self.p2("kelly#1", "nada#7")                      # declarada, mas a filha não é candidato
+        os.remove(os.path.join(self.tmp, "equacoes-%s.jsonl" % ONDA))
+        with self.assertRaises(SystemExit):
+            self.momento()
+        self.assertFalse(os.path.exists(self.arquivo))
 
     def test_argumentos_incoerentes_sao_recusados(self):
         cod, sai = self.texto("c.wl", CODIGO_KELLY), self.texto("s.txt", SAIDA_KELLY)
