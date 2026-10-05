@@ -68,7 +68,8 @@ class TesteCaudas(unittest.TestCase):
     def test_kappa_gaussiana_zero_cauchy_um(self):
         # Cauchy não tem média: o kappa da definição de Taleb (centrado na média amostral) deriva a
         # 0.76-0.92 conforme a semente (sonda do controlador, 05/10/2026, n=20000, 4000 reamostras:
-        # sementes 7/8/9 -> 0.921/0.796/0.755; versão pela mediana -> 0.996/0.990/1.008). Por isso o
+        # sementes 7/8/9 -> 0.921/0.796/0.755; versão pela mediana -> 0.996/0.990/1.008; nesta implementação,
+        # semente 7, a ordem dos sorteios difere e dá 0.974 (média) e 0.993 (mediana)). Por isso o
         # caso Cauchy usa robusto=True.
         self.assertLess(abs(C.kappa(self.normal)), 0.15)
         self.assertLess(abs(C.kappa(self.cauchy, robusto=True) - 1.0), 0.15)

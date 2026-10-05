@@ -4,8 +4,15 @@
 sobrevivência log-log, mais geradores determinísticos (Pareto, normal, Cauchy) para os testes. Só
 biblioteca padrão. Pensado para retornos de mercado brasileiros (`dados_br.retornos_log`).
 
-Valores teóricos de kappa: Gaussiano κ=0, Cauchy κ=1 (valores teóricos; conferência Wolfram registrada
-pelo controlador).
+Valores teóricos de kappa: Gaussiano κ=0, Cauchy κ=1. Conferência executada em 05/10/2026 pelo MCP Wolfram
+(WolframLanguageEvaluator); a checagem da Cauchy usa o desvio pela mediana, como robusto=True:
+
+    # Gaussiano
+    With[{m = Expectation[Abs[x], x \[Distributed] NormalDistribution[0, Sqrt[n]], Assumptions -> n > 0]/Expectation[Abs[x], x \[Distributed] NormalDistribution[0, 1]]}, {m, FullSimplify[2 - Log[n]/Log[m], Assumptions -> n > 1]}]
+    Out[1]= {Sqrt[n], 0}
+    # Cauchy (soma de 30 Cauchy(0,1), mediana de |S_30| sobre mediana de |S_1|)
+    With[{d = TransformedDistribution[Total[Table[x[i], {i, 30}]], Table[x[i] \[Distributed] CauchyDistribution[0, 1], {i, 30}]]}, {d, Median[TransformedDistribution[Abs[y], y \[Distributed] d]]/Median[TransformedDistribution[Abs[y], y \[Distributed] CauchyDistribution[0, 1]]], N[2 - Log[30]/Log[30]]}]
+    Out[1]= {CauchyDistribution[0, 30], 30, 1.}
 
 Toda amostragem usa `random.Random(semente)` explícita: mesma semente, mesmo resultado, bit a bit.
 Entrada vazia ou com valor não finito (nan, inf) levanta ValueError.
