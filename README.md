@@ -22,6 +22,9 @@ e caudas gordas. O veredito do especialista nunca é recomendação de ativo.
 | `skills/lavra/scripts/conferir_onda.py` | portão do PO: relatório de fidelidade e aprovação de uma onda do `mineiro` |
 | `skills/taleb/scripts/dados_br.py` | dados BR reproduzíveis: SGS do BCB e COTAHIST da B3, com cache em `dados/` e testes offline |
 | `skills/taleb/references/dados-br.md` | séries do SGS, layout do COTAHIST, hosts a liberar na rede e download manual do ZIP, dono único |
+| `skills/taleb/SKILL.md` | estação `taleb`: rito em cinco passos (exposição, corpus pelo MCP, dados BR, diagnósticos, Wolfram antes de afirmar conta fechada) e veredito marcado que nunca recomenda ativo |
+| `skills/taleb/references/doutrina.md` | um verbete por conceito de Taleb, cada um com `fonte:` (`[externo]` até a onda 1 ser conferida) |
+| `skills/taleb/references/heuristicas.md` | regras práticas com `condicao:` parseável pelo fiscal sobre `kappa`, `alpha`, `H`, `fracao_segura` |
 | `build/testes/` | testes; `_carga.py` carrega módulos por caminho relativo à raiz |
 | `dados/` | cache dos dados BR (conteúdo fora do git) |
 | `docs/superpowers/` | spec e plano |
