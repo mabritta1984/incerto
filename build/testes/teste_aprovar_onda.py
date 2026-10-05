@@ -19,6 +19,7 @@ from _banco import PARTICAO, banco_de_teste, limpar_banco_de_teste, precisa_neo4
 from _carga import carregar
 
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))
+sys.modules.setdefault("limite_sympy", carregar("skills/lavra/scripts/limite_sympy.py"))
 NUC = sys.modules.setdefault("nucleo", carregar("skills/lavra/scripts/nucleo.py"))
 EQ = sys.modules.setdefault("extrair_equacoes", carregar("skills/lavra/scripts/extrair_equacoes.py"))
 FI = sys.modules.setdefault("fiscal", carregar("skills/lavra/scripts/fiscal.py"))

@@ -11,11 +11,14 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 from _carga import RAIZ, carregar
 
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))
+LS = sys.modules.setdefault("limite_sympy", carregar("skills/lavra/scripts/limite_sympy.py"))
 EQ = sys.modules.setdefault("extrair_equacoes", carregar("skills/lavra/scripts/extrair_equacoes.py"))
 CO = carregar("skills/lavra/scripts/conferir_onda.py")
 parsear_latex, normalizar_latex, equacoes_do_documento = EQ.parsear_latex, EQ.normalizar_latex, EQ.equacoes_do_documento
@@ -23,6 +26,18 @@ parsear_latex, normalizar_latex, equacoes_do_documento = EQ.parsear_latex, EQ.no
 FIXTURES = os.path.join(RAIZ, "build", "testes", "fixtures")
 ONDA = "2026-09-PSX-1"
 MOGHADDAM = "2018-Moghaddam-13b9e4a8-cf24-a1af-4306-2196b6b7d1e3.pdf"
+
+
+@contextlib.contextmanager
+def no_filho(patch):
+    """O SymPy roda num processo filho persistente (`limite_sympy`): o `patch` só vale lá dentro se o filho
+    nascer (fork) com ele aplicado — e o filho que nasceu com ele não pode atender o teste seguinte."""
+    LS.encerrar()
+    try:
+        with patch as p:
+            yield p
+    finally:
+        LS.encerrar()
 
 
 class TesteParse(unittest.TestCase):
@@ -141,12 +156,12 @@ class TesteParse(unittest.TestCase):
         self.assertTrue(parsear_latex(r"\sqrt[3]{x} = y")["ok"])
 
     def test_sem_antlr4_sobe_import_error(self):
-        with mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente")):
+        with no_filho(mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente"))):
             with self.assertRaises(ImportError):
                 parsear_latex(r"x = 1")
 
     def test_erro_inesperado_e_perda_declarada(self):
-        with mock.patch.object(EQ, "_parsear", side_effect=RuntimeError("bug")):
+        with no_filho(mock.patch.object(EQ, "_parsear", side_effect=RuntimeError("bug"))):
             self.assertEqual(parsear_latex(r"x = 1"), {"ok": False, "srepr": None, "simbolos": [],
                                                       "motivo": "erro:RuntimeError"})
 
@@ -190,7 +205,7 @@ class TesteParse(unittest.TestCase):
     def test_resultado_booleano_nunca_vira_ok(self):
         from sympy import true, false, Symbol, And
         for valor in (true, false, And(Symbol("a"), Symbol("b"))):
-            with self.subTest(valor=valor), mock.patch("sympy.parsing.latex.parse_latex", return_value=valor):
+            with self.subTest(valor=valor), no_filho(mock.patch("sympy.parsing.latex.parse_latex", return_value=valor)):
                 r = parsear_latex(r"a + b")
                 self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:booleano")
 
@@ -200,6 +215,7 @@ class TesteParse(unittest.TestCase):
             literais = {n.value for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.Constant)
                         and isinstance(n.value, str) and 0 < len(n.value) < 300 and "\n" not in n.value}
         self.assertGreater(len(literais), 50)
+        literais.discard(INTEGRAL_SEM_FIM)          # só esgota o limite de tempo (10 s): é da TesteTempo
         for latex in sorted(literais):
             r = parsear_latex(latex)
             self.assertFalse(r["ok"] and r["srepr"] in ("true", "false"), latex)
@@ -239,6 +255,49 @@ class TesteParse(unittest.TestCase):
 
 # Convex_Responses.pdf, eq. (1), como o mineiro a converteu
 CONVEX_1 = r"F(x, \lambda) = \frac{f(x + \lambda) + f(x - \lambda)}{2} - f(x) \tag{1}"
+
+
+# Statistical_Consequences_of_Fat_Tails, eq. 2.7 (e 5.2): o SymPy avalia a integral para sempre
+INTEGRAL_SEM_FIM = r"\int_0^\infty e^{\varepsilon x} dF(x) = +\infty \tag{2.7}"
+
+
+class TesteTempo(unittest.TestCase):
+    """O parse roda sob limite de tempo de parede (`limite_sympy`); esgotado, é perda declarada."""
+
+    def test_integral_sem_fim_e_perda_tempo_esgotado_dentro_do_limite(self):
+        with mock.patch.dict(os.environ, {LS.AMBIENTE: "2"}):
+            inicio = time.monotonic()
+            r = parsear_latex(INTEGRAL_SEM_FIM)
+            duracao = time.monotonic() - inicio
+        self.assertEqual(r, {"ok": False, "srepr": None, "simbolos": [], "motivo": "nao_suportado:tempo_esgotado"})
+        self.assertLess(duracao, 5)
+        self.assertTrue(parsear_latex(r"f^{*} = p - \frac{1 - p}{b}")["ok"])     # o próximo parse sobe outro filho
+
+    def test_equacao_rapida_parseia_igual_ao_parse_sem_limite(self):
+        for latex, funcoes in ((r"f^{*} = p - \frac{1 - p}{b}", frozenset()), (r"T_{max} - T_{min}", frozenset()),
+                               (r"F(x, \lambda) = x^{2}", frozenset({"F"})), (r"TC = a", frozenset())):
+            with self.subTest(latex=latex):
+                self.assertEqual(parsear_latex(latex, funcoes), EQ._parsear(latex, funcoes))
+
+    def test_fora_da_thread_principal(self):
+        saida = []
+        with mock.patch.dict(os.environ, {LS.AMBIENTE: "1"}):
+            t = threading.Thread(target=lambda: saida.append(parsear_latex(INTEGRAL_SEM_FIM)))
+            t.start()
+            t.join(30)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(saida[0]["motivo"], "nao_suportado:tempo_esgotado")
+
+    def test_limite_invalido_e_value_error(self):
+        for valor in ("abc", "0", "-2"):
+            with self.subTest(valor=valor), mock.patch.dict(os.environ, {LS.AMBIENTE: valor}):
+                with self.assertRaises(ValueError):
+                    parsear_latex(r"x = 1")
+
+    def test_portao_com_limite_invalido_falha_alto(self):
+        docs = CO.ler_onda(os.path.join(FIXTURES, "extraidos", ONDA))
+        with mock.patch.dict(os.environ, {LS.AMBIENTE: "abc"}), self.assertRaises(ValueError):
+            CO.parseaveis_sympy(docs)
 
 
 class TesteFuncoesDeclaradas(unittest.TestCase):
@@ -458,7 +517,7 @@ class TesteCLI(unittest.TestCase):
         self.assertEqual(self.linhas(), editado)
 
     def test_cli_sem_antlr4_falha_alto(self):
-        with mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente")):
+        with no_filho(mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente"))):
             with self.assertRaises(ImportError):
                 self.rodar()
         self.assertFalse(os.path.exists(self.saida))
@@ -579,7 +638,7 @@ class TestePortao(unittest.TestCase):
 
     def test_portao_sem_antlr4_diz_nao_medido(self):
         docs = CO.ler_onda(os.path.join(FIXTURES, "extraidos", ONDA))
-        with mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente")):
+        with no_filho(mock.patch("sympy.parsing.latex.parse_latex", side_effect=ImportError("antlr4 ausente"))):
             r = CO.resumir(docs)
         self.assertIsNone(r["equacoes"]["parseaveis_sympy"])
         self.assertIn("| parseáveis pelo SymPy | não medido", CO.relatorio_md(ONDA, docs, r))

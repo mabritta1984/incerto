@@ -11,10 +11,13 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 from _carga import carregar
 
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))
+LS = sys.modules.setdefault("limite_sympy", carregar("skills/lavra/scripts/limite_sympy.py"))
 EQ = sys.modules.setdefault("extrair_equacoes", carregar("skills/lavra/scripts/extrair_equacoes.py"))
 FI = carregar("skills/lavra/scripts/fiscal.py")
 equivalente, relacional_parseia, provas_sympy = FI.equivalente, FI.relacional_parseia, FI.provas_sympy
@@ -96,6 +99,45 @@ class TesteEquivalente(unittest.TestCase):
 
     def test_p2_substituicao_ilegivel_e_indeterminado(self):
         self.assertEqual(equivalente(self.mae_kelly, self.filha_kelly, "f", {"b": "(("})["veredito"], "indeterminado")
+
+
+def _dorme(*_):
+    time.sleep(30)
+
+
+class TesteTempo(unittest.TestCase):
+    """solve/simplify e a leitura da condição rodam sob o limite de tempo de parede (`limite_sympy`)."""
+
+    def test_equivalente_lento_e_indeterminado_tempo_esgotado(self):
+        from sympy import Eq, srepr, symbols
+        a, b, c, d, e, x = symbols("a b c d e x")
+        mae = srepr(Eq(a * x**4 + b * x**3 + c * x**2 + d * x + e, 0))    # quártica geral: o solve não volta
+        with mock.patch.dict(os.environ, {LS.AMBIENTE: "1"}):
+            inicio = time.monotonic()
+            r = equivalente(mae, srepr(Eq(x, a + b)), "x", {})
+            self.assertLess(time.monotonic() - inicio, 4)
+        self.assertEqual(r, {"veredito": "indeterminado", "detalhe": "tempo esgotado no SymPy (1 s)"})
+
+    def test_p3_condicao_lenta_e_indeterminado_tempo_esgotado(self):
+        eqs = [{"nome": "e1", "srepr": "Symbol('alpha')", "simbolos": ["alpha"]}]
+        with mock.patch.object(FI, "_relacional_parseia", _dorme), mock.patch.dict(os.environ, {LS.AMBIENTE: "0.3"}):
+            linhas = provas_sympy(eqs, [], [{"equacao": "e1", "condicao": "alpha > 1"}])
+        p3 = [l for l in linhas if l["prova"] == "P3"]
+        self.assertEqual([(l["veredito"], l["detalhe"]) for l in p3],
+                         [("indeterminado", "tempo esgotado no SymPy (0.3 s)")])
+
+    def test_relacional_parseia_lento_sobe_tempo_esgotado(self):
+        with mock.patch.object(FI, "_relacional_parseia", _dorme), mock.patch.dict(os.environ, {LS.AMBIENTE: "0.3"}):
+            with self.assertRaises(LS.TempoEsgotado):
+                relacional_parseia("alpha > 1", ["alpha"])
+
+    def test_limite_invalido_e_value_error(self):
+        mae, filha = srepr_de(MAE_KELLY), srepr_de(FILHA_KELLY)
+        with mock.patch.dict(os.environ, {LS.AMBIENTE: "zero"}):
+            with self.assertRaises(ValueError):
+                equivalente(mae, filha, "f", {})
+            with self.assertRaises(ValueError):
+                relacional_parseia("alpha > 1", ["alpha"])
 
 
 class TesteRelacional(unittest.TestCase):

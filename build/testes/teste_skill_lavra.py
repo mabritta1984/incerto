@@ -11,6 +11,7 @@ import unittest
 from _carga import RAIZ, carregar
 
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))
+sys.modules.setdefault("limite_sympy", carregar("skills/lavra/scripts/limite_sympy.py"))
 sys.modules.setdefault("nucleo", carregar("skills/lavra/scripts/nucleo.py"))
 sys.modules.setdefault("extrair_equacoes", carregar("skills/lavra/scripts/extrair_equacoes.py"))
 sys.modules.setdefault("fiscal", carregar("skills/lavra/scripts/fiscal.py"))

@@ -28,6 +28,10 @@ documentos e são pulados.
      explícita (`p(1-p)`, `\\alpha(1-\\alpha)`, `g(x)`: `nao_suportado:p(`) também são perda — salvo o
      nome que o PO declarou função no documento (decisão `declarar_funcoes`, 05/10: `f(x)`, `F(x, λ)`,
      `\\gamma(x)`); nome declarado usado também como símbolo na mesma equação é `nao_suportado:uso_misto:<f>`.
+  5. tempo: o parse inteiro (passos 1–4) roda sob limite de tempo de parede (`limite_sympy.py`, dono
+     único: processo filho morto ao esgotar; `INCERTO_LIMITE_SYMPY_S`, padrão 10 s; valor inválido é
+     ValueError); esgotado, é perda `nao_suportado:tempo_esgotado` (a eq. 2.7 de *Statistical Consequences
+     of Fat Tails*, `\\int_0^\\infty e^{\\varepsilon x} dF(x) = +\\infty`, o SymPy avalia para sempre).
 Perda é ⚠️ com o LaTeX preservado como veio; nunca some.
 
 Uso:
@@ -54,7 +58,8 @@ import os
 import re
 import sys
 
-import recortar_trechos   # vizinho em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
+import limite_sympy       # vizinhos em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
+import recortar_trechos
 
 CORPUS = "incerto"
 
@@ -277,9 +282,23 @@ def parsear_latex(latex, funcoes=frozenset()):
     `declarar_funcoes`); só esses viram aplicação de função — `p(1-p)` sem `p` declarada segue perda, e o nome
     declarado que também aparece como símbolo na equação é `nao_suportado:uso_misto:<nome>`.
     Falta do `sympy`/`antlr4` sobe como ImportError (o portão diz "não medido", o CLI falha alto); qualquer
-    outro erro inesperado é perda declarada `erro:<tipo>`, nunca um `ok`."""
+    outro erro inesperado é perda declarada `erro:<tipo>`, nunca um `ok`.
+    O trabalho do SymPy roda sob o limite de tempo de parede de `limite_sympy` (`INCERTO_LIMITE_SYMPY_S`,
+    padrão 10 s): esgotado, é perda `nao_suportado:tempo_esgotado`; limite inválido no ambiente sobe ValueError."""
+    import sympy                    # falta do sympy sobe aqui, no chamador; o filho (fork) nasce com ele carregado
+    import sympy.parsing.latex
     try:
-        return _parsear(latex, frozenset(funcoes))
+        return limite_sympy.executar(_parsear_ou_perda, latex, frozenset(funcoes))
+    except limite_sympy.TempoEsgotado:
+        return _perda("nao_suportado:tempo_esgotado")
+    except limite_sympy.ProcessoPerdido:
+        return _perda("erro:ProcessoPerdido")
+
+
+def _parsear_ou_perda(latex, funcoes):
+    """Roda no filho de `limite_sympy`: `_parsear`, com o erro inesperado como perda declarada."""
+    try:
+        return _parsear(latex, funcoes)
     except ImportError:
         raise
     except Exception as e:

@@ -6,6 +6,11 @@ provas P1–P3) e a conferência entre as vias (P4) são do `skills/lavra/script
 `skills/lavra/scripts/registrar_prova.py`. Os formatos de linha descritos aqui são os que esses dois
 scripts validam.
 
+**Tempo.** Todo trabalho do SymPy (o parse da extração e do portão; `equivalente` e `relacional_parseia`
+do fiscal) roda sob limite de tempo de parede (`skills/lavra/scripts/limite_sympy.py`;
+`INCERTO_LIMITE_SYMPY_S`, padrão 10 s): esgotado, é perda declarada `nao_suportado:tempo_esgotado` na
+extração e `indeterminado` "tempo esgotado no SymPy (<n> s)" no fiscal — nunca trava a esteira.
+
 **Regra.** `DERIVA_DE` e `:Equacao` com momento fechado só saem de staging com a prova SymPy verde **e**
 a prova Wolfram verde e concordante. Divergência entre as vias é vermelho, com as duas saídas no relato.
 **Nenhum script chama o Wolfram**: quem roda é o agente, pelo MCP do Wolfram

@@ -13,6 +13,7 @@ import unittest
 from _carga import RAIZ, carregar
 
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))   # vizinhos do
+sys.modules.setdefault("limite_sympy", carregar("skills/lavra/scripts/limite_sympy.py"))
 sys.modules.setdefault("extrair_equacoes", carregar("skills/lavra/scripts/extrair_equacoes.py"))   # import local
 co = carregar("skills/lavra/scripts/conferir_onda.py")
 

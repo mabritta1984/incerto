@@ -18,6 +18,8 @@ um apto de fora por decisão do PO. Nunca apaga `extraidos/` e nunca reescreve `
 Tudo vem dos `.report.json`; o `lote-<data>.md` nunca é lido (o `rerender` do mineiro não o regrava).
 Parseáveis pelo SymPy: medido pela função de parse do `extrair_equacoes.py` (Task 8), por import local,
 sem `sympy` neste arquivo (decisão 1b do PO, 28/09); "não medido" só se esse import (ou o do `sympy`) falhar.
+Cada parse roda sob o limite de tempo de parede do `limite_sympy.py` (equação que estoura conta como não
+parseável, `nao_suportado:tempo_esgotado`); `INCERTO_LIMITE_SYMPY_S` inválido derruba o portão (ValueError).
 Só biblioteca padrão. Não converte nada: o conversor é o `mineiro`.
 
 Uso:
@@ -203,8 +205,8 @@ def parseaveis_sympy(docs):
                 total += 1
                 try:
                     n += 1 if parsear_latex(eq["latex"])["ok"] else 0
-                except ImportError:
-                    raise
+                except (ImportError, ValueError):
+                    raise                   # ValueError: `INCERTO_LIMITE_SYMPY_S` inválido — falha alto
                 except Exception:
                     pass                    # erro inesperado do parse: conta como não parseável, nunca derruba o portão
     except ImportError:

@@ -15,6 +15,7 @@ import unittest
 from _carga import carregar
 
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))
+sys.modules.setdefault("limite_sympy", carregar("skills/lavra/scripts/limite_sympy.py"))
 FI = sys.modules.setdefault("fiscal", carregar("skills/lavra/scripts/fiscal.py"))   # vizinho do import local
 RP = carregar("skills/lavra/scripts/registrar_prova.py")
 

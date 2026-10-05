@@ -46,8 +46,13 @@ sintaxe SymPy}) é aplicada aos dois lados; a filha tem de ser `Equality` com la
 `simplify(sol - filha.rhs) == 0` → verde se for a única solução, e indeterminado ("filha escolhe um
 ramo (k de n)", k = soluções iguais à filha, n = soluções) se houver mais de uma;
 soluções, mas nenhuma igual → vermelho (as soluções no
-`detalhe`); nenhuma solução ou SymPy sem resposta → indeterminado. Não há timeout portável: só `solve`
-e `simplify`, nada mais caro.
+`detalhe`); nenhuma solução ou SymPy sem resposta → indeterminado. Só `solve` e `simplify`, nada mais caro.
+
+Tempo: `equivalente` e `relacional_parseia` (todo o SymPy do fiscal) rodam sob o limite de tempo de parede
+do `limite_sympy.py` (dono único, o mesmo da extração: processo filho morto ao esgotar;
+`INCERTO_LIMITE_SYMPY_S`, padrão 10 s; valor inválido é ValueError). Esgotado → `equivalente` dá
+indeterminado "tempo esgotado no SymPy (<n> s)" (logo a P2), `relacional_parseia` sobe
+`limite_sympy.TempoEsgotado` e a P3 dá indeterminado com o mesmo `detalhe`.
 
 `relacional_parseia`: a estrutura booleana é lida pelo `ast` do Python — `and`/`or`/`not` (e `&`, `|`,
 `~` com os operandos entre parênteses) combinam condições; cada comparação simples (`a > b`, `<`, `>=`,
@@ -78,7 +83,8 @@ import sys
 import time
 import tokenize
 
-import recortar_trechos   # vizinho em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
+import limite_sympy       # vizinhos em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
+import recortar_trechos
 
 VERDE, VERMELHO, INDETERMINADO = "verde", "vermelho", "indeterminado"
 VEREDITOS = (VERDE, VERMELHO, INDETERMINADO)
@@ -120,8 +126,23 @@ def _expressao(texto):
     return parse_expr(texto, {nome: Symbol("lambda" if nome == LAMBDA else nome) for nome in nomes}, evaluate=False)
 
 
+def _no_limite(funcao, *args):
+    """`funcao(*args)` sob o limite de tempo de parede de `limite_sympy` (TempoEsgotado ao esgotar); o `sympy`
+    é carregado aqui, para que a falta dele suba no chamador e o filho (fork) já nasça com ele."""
+    import sympy
+    return limite_sympy.executar(funcao, *args)
+
+
 def equivalente(mae_srepr, filha_srepr, alvo, substituicao):
-    """A filha (`alvo = …`) sai da mãe resolvida para `alvo`, sob a `substituicao` declarada?"""
+    """A filha (`alvo = …`) sai da mãe resolvida para `alvo`, sob a `substituicao` declarada?
+    Sob o limite de tempo de `limite_sympy`: esgotado, indeterminado "tempo esgotado no SymPy (<n> s)"."""
+    try:
+        return _no_limite(_equivalente, mae_srepr, filha_srepr, alvo, substituicao)
+    except (limite_sympy.TempoEsgotado, limite_sympy.ProcessoPerdido) as e:
+        return {"veredito": INDETERMINADO, "detalhe": str(e)}
+
+
+def _equivalente(mae_srepr, filha_srepr, alvo, substituicao):
     from sympy import Equality, Symbol, simplify, solve, sstr, sympify
 
     def resultado(veredito, detalhe):
@@ -170,7 +191,13 @@ def equivalente(mae_srepr, filha_srepr, alvo, substituicao):
 
 
 def relacional_parseia(condicao, simbolos):
-    """`condicao` é uma comparação (ou combinação booleana de comparações) só sobre `simbolos`?"""
+    """`condicao` é uma comparação (ou combinação booleana de comparações) só sobre `simbolos`?
+    Sob o limite de tempo de `limite_sympy`: esgotado, sobe `limite_sympy.TempoEsgotado` (a P3 o lê como
+    indeterminado)."""
+    return _no_limite(_relacional_parseia, condicao, list(simbolos))
+
+
+def _relacional_parseia(condicao, simbolos):
     from sympy import Expr
     from sympy.core.function import AppliedUndef
     from sympy.core.relational import Relational
@@ -337,7 +364,11 @@ def _p3_validade(ctx):
         if nome not in por_nome:
             yield dict(chaves, veredito=VERMELHO, detalhe="equação desconhecida: %s" % nome)
             continue
-        ok = isinstance(condicao, str) and relacional_parseia(condicao, por_nome[nome].get("simbolos") or [])
+        try:
+            ok = isinstance(condicao, str) and relacional_parseia(condicao, por_nome[nome].get("simbolos") or [])
+        except (limite_sympy.TempoEsgotado, limite_sympy.ProcessoPerdido) as e:
+            yield dict(chaves, veredito=INDETERMINADO, detalhe=str(e))
+            continue
         yield dict(chaves, veredito=VERDE if ok else VERMELHO,
                    detalhe=("condição %s" if ok else "condição não é relacional sobre os símbolos da equação: %s")
                    % condicao)
