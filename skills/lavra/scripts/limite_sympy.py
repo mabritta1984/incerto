@@ -79,17 +79,17 @@ def _laco(funcao, conexao):
     signal.signal(signal.SIGINT, signal.SIG_IGN)            # o Ctrl-C é do pai, que mata o filho
     while True:
         try:
-            args = conexao.recv()
+            seq, args = conexao.recv()
         except (EOFError, OSError):
             return
         try:
-            resposta = ("ok", funcao(*args))
+            resposta = (seq, "ok", funcao(*args))
         except BaseException as e:
-            resposta = ("erro", _transportavel(e))
+            resposta = (seq, "erro", _transportavel(e))
         try:
             conexao.send(resposta)
         except Exception as e:                               # resultado que não atravessa o pickle
-            conexao.send(("erro", RuntimeError("resposta do SymPy não transportável: %s: %s" % (type(e).__name__, e))))
+            conexao.send((seq, "erro", RuntimeError("resposta do SymPy não transportável: %s: %s" % (type(e).__name__, e))))
 
 
 class _Filho:
@@ -97,6 +97,7 @@ class _Filho:
         self.funcao = funcao
         self.trava = threading.Lock()
         self.processo = self.conexao = None
+        self.seq = 0                                         # número do pedido; o filho o devolve na resposta
 
     def _abrir(self):
         ctx = multiprocessing.get_context("fork")
@@ -121,15 +122,25 @@ class _Filho:
             if self.processo is None or not self.processo.is_alive():
                 self.fechar()
                 self._abrir()
-            self.conexao.send(args)
-            if not self.conexao.poll(limite):
-                self.fechar()
-                raise TempoEsgotado(limite)
+            self.seq += 1
+            seq = self.seq
             try:
-                estado, valor = self.conexao.recv()
-            except (EOFError, OSError):
+                self.conexao.send((seq, args))
+                esgotou = not self.conexao.poll(limite)
+                if not esgotou:
+                    seq_resposta, estado, valor = self.conexao.recv()
+            except (EOFError, OSError):                      # o filho morreu entre `is_alive()` e o envio/a leitura
                 self.fechar()
                 raise ProcessoPerdido("o processo do SymPy morreu sem responder")
+            except BaseException:                            # interrupção/timeout externo: a resposta ficaria pendente
+                self.fechar()                                # e a próxima chamada leria a desta; mata e descarta
+                raise
+            if esgotou:
+                self.fechar()
+                raise TempoEsgotado(limite)
+            if seq_resposta != seq:                          # resposta de outro pedido: nunca a entrega
+                self.fechar()
+                raise ProcessoPerdido("resposta do SymPy fora de sequência (pedido %d, resposta %r)" % (seq, seq_resposta))
         if estado == "erro":
             raise valor
         return valor

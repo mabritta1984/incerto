@@ -5,7 +5,7 @@ Cada heurística liga um diagnóstico numérico da estação a uma consequência
 - `enunciado:` a regra, em uma frase;
 - `condicao:` quando ela se aplica, em sintaxe SymPy sobre os símbolos `kappa`, `alpha`, `H` e
   `fracao_segura` (`or`/`and`/`not` de comparações simples são aceitos). O teste da estação passa toda
-  condição por `fiscal.relacional_parseia(condicao, ["kappa", "alpha", "H", "fracao_segura"])`;
+  condição por `fiscal.relacional_parseia(condicao, ["kappa", "alpha", "H", "fracao_segura"])` (pode levantar `TempoEsgotado` numa condição patológica);
 - `sustenta:` os conceitos de `doutrina.md` que a justificam, pelo título do verbete;
 - `fonte:` como na doutrina — `[externo]` com o livro enquanto nenhuma onda estiver conferida; `(documento,
   tópico)` dos `conferidos/` depois da Task 19.

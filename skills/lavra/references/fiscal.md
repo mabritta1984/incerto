@@ -11,6 +11,10 @@ do fiscal) roda sob limite de tempo de parede (`skills/lavra/scripts/limite_symp
 `INCERTO_LIMITE_SYMPY_S`, padrão 10 s): esgotado, é perda declarada `nao_suportado:tempo_esgotado` na
 extração e `indeterminado` "tempo esgotado no SymPy (<n> s)" no fiscal — nunca trava a esteira.
 
+Se um item esgota o limite depende da carga da máquina e de `INCERTO_LIMITE_SYMPY_S`: reexecuções perto do
+limite podem alternar verde↔indeterminado. Isso falha fechado — a aprovação recusa com "fiscal desatualizado"
+e a extração recusa sobrescrever —; reexecute com o mesmo limite ou aumente-o.
+
 **Regra.** `DERIVA_DE` e `:Equacao` com momento fechado só saem de staging com a prova SymPy verde **e**
 a prova Wolfram verde e concordante. Divergência entre as vias é vermelho, com as duas saídas no relato.
 **Nenhum script chama o Wolfram**: quem roda é o agente, pelo MCP do Wolfram

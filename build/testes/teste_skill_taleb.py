@@ -13,6 +13,7 @@ sys.modules.setdefault("caudas", carregar("skills/taleb/scripts/caudas.py"))
 sys.modules.setdefault("convexidade", carregar("skills/taleb/scripts/convexidade.py"))
 R = carregar("skills/taleb/scripts/relatorio.py")
 sys.modules.setdefault("recortar_trechos", carregar("skills/lavra/scripts/recortar_trechos.py"))
+sys.modules.setdefault("limite_sympy", carregar("skills/lavra/scripts/limite_sympy.py"))
 FI = carregar("skills/lavra/scripts/fiscal.py")
 
 SKILL = "skills/taleb/SKILL.md"

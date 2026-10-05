@@ -131,6 +131,16 @@ class TesteTempo(unittest.TestCase):
             with self.assertRaises(LS.TempoEsgotado):
                 relacional_parseia("alpha > 1", ["alpha"])
 
+    def test_processo_perdido_e_indeterminado_na_p2_e_na_p3(self):
+        perdido = LS.ProcessoPerdido("o processo do SymPy morreu sem responder")
+        with mock.patch.object(LS, "executar", side_effect=perdido):
+            r = equivalente("x", "y", "x", {})
+            linhas = provas_sympy([{"nome": "e1", "srepr": "Symbol('alpha')", "simbolos": ["alpha"]}], [],
+                                  [{"equacao": "e1", "condicao": "alpha > 1"}])
+        self.assertEqual(r, {"veredito": "indeterminado", "detalhe": "o processo do SymPy morreu sem responder"})
+        self.assertEqual([(l["veredito"], l["detalhe"]) for l in linhas if l["prova"] == "P3"],
+                         [("indeterminado", "o processo do SymPy morreu sem responder")])
+
     def test_limite_invalido_e_value_error(self):
         mae, filha = srepr_de(MAE_KELLY), srepr_de(FILHA_KELLY)
         with mock.patch.dict(os.environ, {LS.AMBIENTE: "zero"}):

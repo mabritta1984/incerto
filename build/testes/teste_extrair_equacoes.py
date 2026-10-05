@@ -264,6 +264,11 @@ INTEGRAL_SEM_FIM = r"\int_0^\infty e^{\varepsilon x} dF(x) = +\infty \tag{2.7}"
 class TesteTempo(unittest.TestCase):
     """O parse roda sob limite de tempo de parede (`limite_sympy`); esgotado, é perda declarada."""
 
+    def test_processo_perdido_e_perda_declarada(self):
+        with mock.patch.object(LS, "executar", side_effect=LS.ProcessoPerdido("morreu")):
+            r = parsear_latex(r"f^{*} = p")
+        self.assertEqual(r, {"ok": False, "srepr": None, "simbolos": [], "motivo": "erro:ProcessoPerdido"})
+
     def test_integral_sem_fim_e_perda_tempo_esgotado_dentro_do_limite(self):
         with mock.patch.dict(os.environ, {LS.AMBIENTE: "2"}):
             inicio = time.monotonic()
