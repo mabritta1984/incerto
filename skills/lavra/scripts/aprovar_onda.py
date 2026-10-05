@@ -13,7 +13,9 @@ Gate (`decidir`, função pura), item a item — TODAS as linhas do fiscal do it
                 `momento_fechado` ou aplica `E`/`Var` (`fiscal.aplica_momento`), a P4 de momento verde (e
                 toda P4 de momento sobre ela, sempre); sem declaração, essa P4 é indeterminado.
   `DERIVA_DE`   a P2 da linha de derivação (mae, filha, simbolo, substituicao) E a P4 (mae, filha) verdes,
-                e as duas pontas promovíveis. Grava `verificado_por: ["sympy@1.14.0", "wolfram"]`.
+                e as duas pontas promovíveis. `verificado_por` lista só as vias cuja linha deu verde
+                (`sympy@1.14.0` pela P2, `wolfram` pela P4); a linha que passou por aceite do PO vai em
+                `aceites_po` (nomes das provas), nunca em `verificado_por`.
   `VALIDA_SOB`  a P3 (equacao, condicao) verde e a equação promovível.
   Passar = `verde`, ou `indeterminado` com decisão `{"tipo": "aceitar_indeterminado", "prova", <chaves
   estruturadas da linha>}` idêntica àquela linha (sem curinga, sem chave a menos ou a mais). `vermelho`
@@ -56,7 +58,7 @@ import recortar_trechos
 CORPUS = "incerto"
 APROVADO, STAGING = "aprovado", "staging"
 VERDE, VERMELHO, INDETERMINADO = fiscal.VERDE, fiscal.VERMELHO, fiscal.INDETERMINADO
-VERIFICADO_POR = ["sympy@1.14.0", "wolfram"]
+VERIFICADO_POR = ("sympy@1.14.0", "wolfram")    # a via da P2 e a da P4, nessa ordem
 TIPOS_CONCEITO = ("fenomeno", "principio", "falacia", "regime")
 
 # chaves estruturadas de cada prova (as de `fiscal.py`); a P4 tem duas formas: derivação ou momento
@@ -338,9 +340,12 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
         pend += ["%s %s fica em staging" % (papel, n) for papel, n in (("mãe", mae), ("filha", filha))
                  if status_eq[n] != APROVADO]
         status = STAGING if pend else APROVADO
+        # só a via cuja linha deu verde verifica; a linha aceita pelo PO vai em `aceites_po`, não aqui
+        verdes = [via for via, linhas in zip(VERIFICADO_POR, (p2.get(k2, []), p4d.get(k4, [])))
+                  if linhas and all(l["veredito"] == VERDE for l in linhas)]
         plano_der.append({"mae": mae, "filha": filha, "passo": d.get("passo"), "simbolo": d.get("alvo"),
                           "substituicao": c(d.get("substituicao") or {}),
-                          "verificado_por": list(VERIFICADO_POR) if status == APROVADO else [],
+                          "verificado_por": verdes if status == APROVADO else [],
                           "fonte": c(por_nome[filha]["fonte"]), "status": status, "pendencias": pend,
                           "aceites_po": aceitas})
 

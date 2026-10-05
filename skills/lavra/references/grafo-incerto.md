@@ -58,7 +58,7 @@ pelo portão do PO dos `conferidos/`, não pelo fiscal. `:Documento` é criado p
 | `PERTENCE_A` | `:Trecho` → `:Documento` | par | — | ingestão (estrutural) |
 | `USA` | `:Equacao` → `:Variavel` | par + `corpus` | `papel` (`definida`: o símbolo é o lado esquerdo `Equality(Symbol(...), …)` do `srepr`; senão `entrada`), `simbolos`, `status`, `fonte` | status da equação |
 | `DEFINIDA_POR` | `:Variavel` → `:Equacao` | par + `corpus` | `status`, `fonte` | quando `USA.papel = 'definida'`; status da equação |
-| `DERIVA_DE` | filha → mãe (`:Equacao`) | par + `corpus` | `passo`, `simbolo` (o `alvo` isolado), `substituicao` (JSON), `verificado_por: ["sympy@1.14.0", "wolfram"]` (vazio em staging), `status`, `fonte` (a da filha), `pendencias`, `aceites_po` | P2 **e** P4 + as duas pontas aprovadas |
+| `DERIVA_DE` | filha → mãe (`:Equacao`) | par + `corpus` | `passo`, `simbolo` (o `alvo` isolado), `substituicao` (JSON), `verificado_por` (só as vias cuja linha deu verde: `"sympy@1.14.0"` pela P2, `"wolfram"` pela P4; vazio em staging), `status`, `fonte` (a da filha), `pendencias`, `aceites_po` (nomes das provas que passaram por aceite do PO — `aceitar_indeterminado` —, nunca em `verificado_por`) | P2 **e** P4 + as duas pontas aprovadas |
 | `VALIDA_SOB` | `:Equacao` → `:Variavel` | par + `corpus` + `condicao` | `condicao` (relacional sobre os símbolos), `status`, `fonte` (a da equação), `pendencias`, `aceites_po` | P3 + equação aprovada |
 | `EXPRESSA` | `:Equacao` → `:Conceito` | par + `corpus` | `status`, `fonte` | reservado — sem escritor na 0.1.0 |
 | `SUSTENTA` | `:Heuristica` → `:Conceito` \| `:Equacao` | par + `corpus` | `status` (o do alvo), `fonte` (a da heurística) | decisão `heuristica` |

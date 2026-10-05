@@ -88,7 +88,7 @@ class TesteProtocolo(unittest.TestCase):
 
     def test_tools_call_ida_e_volta_com_banco_falso(self):
         banco = BancoFalso({"equacao": [["x = y", "Equality(Symbol('x'), Symbol('y'))", "algebrica", None, [],
-                                         fonte("Doc.pdf.md", "T1")]]})
+                                         fonte("Doc.pdf.md", "T1"), []]]})
         MCP.CONTEXTO = ({}, "neo4j", banco)
         self.addCleanup(setattr, MCP, "CONTEXTO", None)
         saida = io.StringIO()
@@ -256,18 +256,21 @@ class TesteLeituras(ComBancoFalso):
     def test_ler_equacao_monta_campos(self):
         banco = self.usar(BancoFalso({
             "equacao": [["\\kappa", "Symbol('kappa')", "algebrica", json.dumps({"media": "0"}), ["n > 1"],
-                         fonte("A.pdf.md", "Kappa")]],
+                         fonte("A.pdf.md", "Kappa"), ["P3"]]],
             "equacao_variaveis": [["n", "n", "entrada", ["n"]]],
-            "equacao_valida_sob": [["n > 1", "n", fonte("A.pdf.md", "Kappa")]],
-            "equacao_deriva_de": [["A.pdf.md#0", 1, "kappa", json.dumps({"x": "y"}), ["sympy@1.14.0", "wolfram"],
-                                   fonte("A.pdf.md", "Kappa")]]}))
+            "equacao_valida_sob": [["n > 1", "n", fonte("A.pdf.md", "Kappa"), ["P3"]]],
+            "equacao_deriva_de": [["A.pdf.md#0", 1, "kappa", json.dumps({"x": "y"}), ["sympy@1.14.0"],
+                                   fonte("A.pdf.md", "Kappa"), ["P4"]]]}))
         r = MCP.tool_ler_equacao({"nome": "A.pdf.md#1"})
         self.assertEqual(r["srepr"], "Symbol('kappa')")
         self.assertEqual(r["momento_fechado"], {"media": "0"})
         self.assertEqual(r["variaveis"], [{"nome": "n", "simbolo": "n", "papel": "entrada", "simbolos": ["n"]}])
-        self.assertEqual(r["valida_sob"], [{"condicao": "n > 1", "variavel": "n",
+        self.assertEqual(r["valida_sob"], [{"condicao": "n > 1", "variavel": "n", "aceites_po": ["P3"],
                                             "fonte": {"documento": "A.pdf.md", "topico": "Kappa"}}])
-        self.assertEqual(r["deriva_de"][0]["verificado_por"], ["sympy@1.14.0", "wolfram"])
+        # I3: a via aceita pelo PO não é verificação — vem em `aceites_po`, ao lado de `verificado_por`
+        self.assertEqual(r["deriva_de"][0]["verificado_por"], ["sympy@1.14.0"])
+        self.assertEqual(r["deriva_de"][0]["aceites_po"], ["P4"])
+        self.assertEqual(r["aceites_po"], ["P3"])
         self.assertEqual(r["deriva_de"][0]["substituicao"], {"x": "y"})
         self.assertEqual(r["status"], "aprovado")
         self.assertTrue(all(p["corpus"] == "incerto" and p["nome"] == "A.pdf.md#1" for _s, p in banco.chamadas))

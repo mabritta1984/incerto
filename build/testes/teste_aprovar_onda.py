@@ -197,6 +197,20 @@ class TesteGateDerivacao(unittest.TestCase):
         d = self.aresta(fis, os_dois)
         self.assertEqual((d["status"], d["aceites_po"]), ("aprovado", ["P2", "P4"]))
 
+    def test_verificado_por_so_lista_as_vias_verdes(self):
+        # I3: aceite do PO não é verificação — a via aceita vai em `aceites_po`, nunca em `verificado_por`
+        fis = [p2("m", "f", "indeterminado"), p4d("m", "f", "indeterminado")]
+        os_dois = [aceite(prova="P2", mae="m", filha="f", simbolo="x", substituicao={}),
+                   aceite(prova="P4", mae="m", filha="f")]
+        d = self.aresta(fis, os_dois)
+        self.assertEqual((d["status"], d["verificado_por"], d["aceites_po"]), ("aprovado", [], ["P2", "P4"]))
+        d = self.aresta([p2("m", "f"), p4d("m", "f", "indeterminado")], os_dois[1:])
+        self.assertEqual((d["status"], d["verificado_por"], d["aceites_po"]), ("aprovado", ["sympy@1.14.0"], ["P4"]))
+        d = self.aresta([p2("m", "f", "indeterminado"), p4d("m", "f")], os_dois[:1])
+        self.assertEqual((d["status"], d["verificado_por"], d["aceites_po"]), ("aprovado", ["wolfram"], ["P2"]))
+        d = self.aresta([p2("m", "f"), p4d("m", "f")])
+        self.assertEqual((d["verificado_por"], d["aceites_po"]), (["sympy@1.14.0", "wolfram"], []))
+
     def test_aceite_sem_todas_as_chaves_ou_com_curinga_e_recusado(self):
         for dec in (aceite(prova="P2", mae="m", filha="f"),                       # sem simbolo/substituicao
                     aceite(prova="P2", mae="m", filha="f", simbolo=None, substituicao={}),
@@ -513,6 +527,9 @@ class TesteBancoReal(BaseOnda):
         self.onda.gravar()
         self.executar()
         self.assertEqual(self.status_deriva("Ramo.pdf.md#2"), [["aprovado"]])
+        # aceite não é verificação: nenhuma via em `verificado_por`, as duas provas em `aceites_po`
+        self.assertEqual(self.q("MATCH (:Equacao {corpus: $c, nome: 'Ramo.pdf.md#2'})-[r:DERIVA_DE]->() "
+                                "RETURN r.verificado_por, r.aceites_po"), [[[], ["P2", "P4"]]])
 
     def test_deriva_de_grava_as_duas_vias_em_verificado_por(self):
         self.onda.gravar()

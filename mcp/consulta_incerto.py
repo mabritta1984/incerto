@@ -13,7 +13,8 @@ Ferramentas (modelo do grafo: skills/lavra/references/grafo-incerto.md, dono ún
     `fonte` é esse par) — nunca o texto do trecho (direito autoral) nem score. Sem Vertex, degrada para
     só o fulltext e diz (`"modo": "lexical"` + `aviso`).
   - `ler_equacao(nome)`: latex, srepr, forma, momento_fechado, variáveis (`USA`), `VALIDA_SOB`,
-    `DERIVA_DE` com `verificado_por`, fonte.
+    `DERIVA_DE` com `verificado_por` (só as vias que deram verde) e `aceites_po` (as provas que passaram por
+    aceite do PO, não por verificação — também na equação e em cada `VALIDA_SOB`), fonte.
   - `ler_conceito(nome)`: definição, sinônimos, heurísticas que o `SUSTENTA`m, equações que o `EXPRESSA`m,
     fonte.
   - `situacao_camada()`: contagem dos nós aprovados por rótulo, trechos, índices presentes e o corpus.
@@ -128,7 +129,7 @@ CYPHER = {
         "RETURN e.fonte, e.nome ORDER BY e.nome"),
     "equacao": (
         "MATCH %s\n"
-        "RETURN e.latex, e.sympy_srepr, e.forma, e.momento_fechado, e.faixa_validade, e.fonte" % _EQ),
+        "RETURN e.latex, e.sympy_srepr, e.forma, e.momento_fechado, e.faixa_validade, e.fonte, e.aceites_po" % _EQ),
     "equacao_variaveis": (
         "MATCH %s-[r:USA {corpus: $corpus, status: 'aprovado'}]->"
         "(v:Variavel {corpus: $corpus, status: 'aprovado'})\n"
@@ -136,11 +137,12 @@ CYPHER = {
     "equacao_valida_sob": (
         "MATCH %s-[r:VALIDA_SOB {corpus: $corpus, status: 'aprovado'}]->"
         "(v:Variavel {corpus: $corpus, status: 'aprovado'})\n"
-        "RETURN r.condicao, v.nome, r.fonte ORDER BY r.condicao, v.nome" % _EQ),
+        "RETURN r.condicao, v.nome, r.fonte, r.aceites_po ORDER BY r.condicao, v.nome" % _EQ),
     "equacao_deriva_de": (
         "MATCH %s-[r:DERIVA_DE {corpus: $corpus, status: 'aprovado'}]->"
         "(m:Equacao {corpus: $corpus, status: 'aprovado'})\n"
-        "RETURN m.nome, r.passo, r.simbolo, r.substituicao, r.verificado_por, r.fonte ORDER BY m.nome" % _EQ),
+        "RETURN m.nome, r.passo, r.simbolo, r.substituicao, r.verificado_por, r.fonte, r.aceites_po "
+        "ORDER BY m.nome" % _EQ),
     "conceito": (
         "MATCH %s\n"
         "RETURN c.tipo, c.definicao, c.sinonimos, c.fonte" % _CONC),
@@ -270,17 +272,17 @@ def tool_ler_equacao(args):
     linhas = consultar(CYPHER["equacao"], par)
     if not linhas:
         return {"erro": NAO_ENCONTRADA}
-    latex, srepr, forma, momento, faixa, fonte = linhas[0]
+    latex, srepr, forma, momento, faixa, fonte, aceites = linhas[0]
     return {
         "nome": nome, "status": "aprovado", "latex": latex, "srepr": srepr, "forma": forma,
-        "momento_fechado": _json(momento), "faixa_validade": faixa or [],
+        "momento_fechado": _json(momento), "faixa_validade": faixa or [], "aceites_po": aceites or [],
         "variaveis": [{"nome": n, "simbolo": s, "papel": p, "simbolos": ss}
                       for n, s, p, ss in consultar(CYPHER["equacao_variaveis"], par)],
-        "valida_sob": [{"condicao": c, "variavel": v, "fonte": _json(f)}
-                       for c, v, f in consultar(CYPHER["equacao_valida_sob"], par)],
+        "valida_sob": [{"condicao": c, "variavel": v, "fonte": _json(f), "aceites_po": ac or []}
+                       for c, v, f, ac in consultar(CYPHER["equacao_valida_sob"], par)],
         "deriva_de": [{"mae": m, "passo": p, "simbolo": s, "substituicao": _json(sub), "verificado_por": vp or [],
-                       "fonte": _json(f)}
-                      for m, p, s, sub, vp, f in consultar(CYPHER["equacao_deriva_de"], par)],
+                       "aceites_po": ac or [], "fonte": _json(f)}
+                      for m, p, s, sub, vp, f, ac in consultar(CYPHER["equacao_deriva_de"], par)],
         "fonte": _json(fonte),
     }
 
@@ -339,7 +341,9 @@ TOOLS = [
     {
         "name": "ler_equacao",
         "description": "Lê uma :Equacao aprovada por nome exato: latex, srepr (SymPy), forma, momento_fechado, "
-                       "variáveis (USA), VALIDA_SOB, DERIVA_DE (com verificado_por) e fonte (documento, tópico). "
+                       "variáveis (USA), VALIDA_SOB, DERIVA_DE (com verificado_por: só as vias que deram verde) e fonte "
+                       "(documento, tópico); aceites_po (na equação, em cada VALIDA_SOB e DERIVA_DE) lista as "
+                       "provas indeterminadas que passaram por aceite do PO, não por verificação. "
                        "Só arestas aprovadas entre nós aprovados. Fora do corpus aprovado: "
                        "{\"erro\": \"não encontrada no corpus aprovado\"}.",
         "inputSchema": {"type": "object", "properties": {"nome": {"type": "string"}}, "required": ["nome"]},
