@@ -417,6 +417,20 @@ class TesteDocumento(unittest.TestCase):
         self.assertEqual(eqs[0]["latex"], "a = b")
 
 
+    def test_titulo_acima_do_corte_nao_leva_equacao_ao_topico_de_cima(self):
+        # rodada corpus A: SCFT (onda 2026-10-TALEB-1, --nivel 3) — a equação depois de "# 3 …"/"## 3.1 …"
+        # ficava em "2.2.31 Dynamic hedging"; o tópico de cada equação é o de um trecho que existe.
+        md = ("### 2.2.31 Dynamic hedging\n\n$$a = b$$\n\nPart I\n# FAT TAILS AND THEIR EFFECTS, AN INTRODUCTION\n\n"
+              "# 3 A NON-TECHNICAL OVERVIEW\n\n$$c = d$$\n\n## 3.1 ON THE DIFFERENCE\n\n$$e = f$$\n\n"
+              "## 3.2 A CATEGORIZATION\n\n### 3.3 THE MAIN CONSEQUENCES\n\n$$g = h$$\n")
+        eqs = equacoes_do_documento(md, "X.pdf.md", nivel=3)
+        self.assertEqual([e["topico"] for e in eqs], ["2.2.31 Dynamic hedging", "3 A NON-TECHNICAL OVERVIEW",
+                                                     "3.1 ON THE DIFFERENCE", "3.3 THE MAIN CONSEQUENCES"])
+        inf = float("inf")
+        trechos, _ = sys.modules["recortar_trechos"].recortar_texto(md, 3, 0, inf, inf, inf)
+        self.assertLessEqual({e["topico"] for e in eqs}, {t["topico"] for t in trechos})
+
+
 def _corpus(raiz):
     """conferidos/<onda>/ com os .md da fixture e o que não é documento (pulado)."""
     ext = os.path.join(FIXTURES, "extraidos", ONDA)

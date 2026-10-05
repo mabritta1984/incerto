@@ -82,7 +82,8 @@ reprovado fica em `extraidos/` e volta por onda nova ou `rerender` do `mineiro`.
 
 ### 4. Recortar, ingerir e extrair
 
-Os três leem `<corpus>/conferidos/<onda>/` e nada mais. Recorte verbatim em trechos citáveis:
+Os três leem `<corpus>/conferidos/<onda>/` e nada mais. Recorte verbatim em trechos citáveis (título de
+nível acima do `--nivel` fecha o tópico corrente e abre o seu; sem corpo, vira prefixo do próximo tópico):
 
 ```
 python3 skills/lavra/scripts/recortar_trechos.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/trechos-<onda>.jsonl

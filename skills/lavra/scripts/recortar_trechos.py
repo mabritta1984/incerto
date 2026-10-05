@@ -8,6 +8,9 @@ feito "de cabeça" condensa em silêncio; este script é o único produtor de tr
 
 Regra de recorte (fidelidade total, texto verbatim):
   - o arquivo é dividido pelos títulos do nível declarado (default 2: linhas `## `);
+  - título de nível ACIMA do corte (`#` com --nivel 2) fecha o bloco corrente: o texto que vem depois
+    dele é tópico próprio, com o título dessa linha; título acima do corte sem corpo (`# Parte` seguido
+    direto de `## Cap.`) entra como prefixo verbatim do próximo bloco — nunca fica no tópico de cima;
   - o preâmbulo antes do primeiro título vira o tópico "(abertura)";
   - default é sem divisão (um tópico = um vetor); `--maxlen N` (>0) parte o bloco em fronteira de
     linha (campo `parte`); partes gravam `junta` (o separador consumido) e, a partir da 2ª,
@@ -148,40 +151,67 @@ def nivel_do_subtitulo(corpo, nivel):
     return None
 
 
+def linha_do_titulo(corpo, nivel):
+    """A linha de título do tópico (vai em `cabecalho` das partes seguintes): a última da sequência de
+    títulos de nível ≤ N que abre o bloco — o prefixo `# Parte` não é o título de `## Cap.`. Bloco que não
+    abre com título dessa sequência (a "(abertura)") devolve a primeira linha se ela for título, ou None."""
+    if not corpo.startswith("#"):
+        return None
+    ultima = corpo.split("\n", 1)[0]
+    for linha in corpo.split("\n"):
+        if not linha.strip():
+            continue
+        m = re.match(r"^(#{1,6}) ", linha)
+        if not m or len(m.group(1)) > nivel:
+            break
+        ultima = linha
+    return ultima
+
+
 def recortar_texto(texto, nivel, maxlen, alerta_chars, teto_chars, subtitulo_chars=SUBTITULO_CHARS):
-    """Divide pelo título de nível N; preâmbulo vira '(abertura)'. Verbatim.
+    """Divide pelos títulos de nível ≤ N; preâmbulo vira '(abertura)'. Verbatim.
 
     A linha `## Título` permanece como primeira linha do `texto` do bloco (mesma
     forma dos trechos já gravados — MERGE idempotente entre levas).
 
+    Título de nível < N (rodada corpus A, 2026-10-05) FECHA o bloco corrente: o texto depois
+    dele, até o próximo título de nível ≤ N, é um tópico próprio com o título dessa linha —
+    nunca é atribuído ao tópico de cima. Título de nível < N sem corpo (`# Parte` seguido direto
+    de `## Cap.`) não vira tópico vazio: entra como prefixo verbatim do próximo bloco. `pai` de
+    um bloco é o título de nível mais alto (número menor) mais próximo acima do seu.
+
     Devolve (chunks, alertas). chunks: dicts com topico, parte, ordem, texto.
     Tópico acima de `alerta_chars` gera aviso (pauta, não corte); acima de
     `teto_chars` (contexto do modelo) ABORTA (SystemExit) listando os estouros."""
-    marcador = "#" * nivel + " "
-    blocos, atual, titulo, linha_titulo, pai = [], [], "(abertura)", None, None
+    blocos, linhas, titulo, pai_do_bloco = [], [], "(abertura)", None
+    so_titulos = False      # o bloco corrente até aqui é só título(s) de nível < N e brancos
+    acima = {}              # nível -> título vigente, para achar o `pai`
 
     def fechar_bloco():
-        corpo_bruto = "".join(atual)
-        corpo = corpo_bruto if linha_titulo is None else (linha_titulo + "\n" + corpo_bruto)
-        corpo = corpo.strip()
+        corpo = "".join(linhas).strip()
         if corpo:
             blocos.append((titulo, pai_do_bloco, corpo))
 
-    pai_do_bloco = None
     for linha in texto.splitlines(keepends=True):
         m = re.match(r"^(#{1,6}) (.*)$", linha.rstrip("\n"))
-        if m and len(m.group(1)) < nivel:
+        n = len(m.group(1)) if m else 0
+        if m and n <= nivel:
             # P-AL: NFC na CAPTURA — desambiguar_topicos monta a chave ("<titulo> — <pai>") a
             # partir destes valores; normalizar só no chunks.append chegaria tarde demais.
-            pai = unicodedata.normalize("NFC", m.group(2).strip())
-            atual.append(linha)
+            t = unicodedata.normalize("NFC", m.group(2).strip())
+            for k in [k for k in acima if k >= n]:
+                del acima[k]
+            pai = acima[max(acima)] if acima else None
+            acima[n] = t
+            if not so_titulos:
+                fechar_bloco()
+                linhas = []
+            linhas.append(linha)
+            titulo, pai_do_bloco, so_titulos = t, pai, n < nivel
             continue
-        if linha.startswith(marcador):
-            fechar_bloco()
-            titulo = unicodedata.normalize("NFC", linha[len(marcador):].strip())
-            linha_titulo, atual, pai_do_bloco = linha.rstrip("\n"), [], pai
-        else:
-            atual.append(linha)
+        if so_titulos and linha.strip():
+            so_titulos = False
+        linhas.append(linha)
     fechar_bloco()
     blocos = desambiguar_topicos(blocos)
     chunks, alertas, estouros = [], [], []
@@ -196,7 +226,7 @@ def recortar_texto(texto, nivel, maxlen, alerta_chars, teto_chars, subtitulo_cha
                 alertas.append("⚠️ tópico longo: %s (%d chars) — pauta da rodada, não corte%s" % (top, len(corpo), dica))
             elif sub and len(corpo) > subtitulo_chars:
                 alertas.append("⚠️ tópico grande com subtítulos: %s (%d chars)%s" % (top, len(corpo), dica))
-        linha_titulo = corpo.split("\n", 1)[0] if corpo.startswith("#") else None
+        linha_titulo = linha_do_titulo(corpo, nivel)
         for n, (junta, p) in enumerate(split_topic(corpo, maxlen), 1):
             ch = {"topico": unicodedata.normalize("NFC", top), "parte": n, "ordem": ordem, "texto": p, "junta": junta}
             if n > 1 and linha_titulo:

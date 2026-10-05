@@ -602,10 +602,12 @@ class TesteRecorteEExtracao(_Corpus):
         inf = float("inf")
         trechos, _ = rt.recortar_texto(self.texto, 2, 0, inf, inf, inf)
         topicos = [t["topico"] for t in trechos]
-        self.assertEqual(topicos, ["(abertura)", "18 Binaries: European and American", "19 Barrier Options"])
+        # `# Dynamic Hedging` não tem corpo: prefixo verbatim do primeiro `##` (rodada corpus A)
+        self.assertEqual(topicos, ["18 Binaries: European and American", "19 Barrier Options"])
+        self.assertTrue(trechos[0]["texto"].startswith("# Dynamic Hedging\n\n## 18 Binaries"))
         self.assertFalse(any("reparo" in t for t in topicos))
-        self.assertIn("<!-- reparo: páginas 321-340", trechos[1]["texto"])
-        self.assertIn("<!-- fim do reparo: páginas 321-340 -->", trechos[2]["texto"])
+        self.assertIn("<!-- reparo: páginas 321-340", trechos[0]["texto"])
+        self.assertIn("<!-- fim do reparo: páginas 321-340 -->", trechos[1]["texto"])
 
     def test_equacoes_na_ordem_do_md_emendado(self):
         eqs = ee.equacoes_do_documento(self.texto, DOC + ".md")

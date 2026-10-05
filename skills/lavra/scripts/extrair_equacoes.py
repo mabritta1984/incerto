@@ -3,8 +3,9 @@
 """Equações display (`$$…$$`) dos documentos aprovados pelo PO → candidatos a `:Equacao` em staging — JSONL.
 
 Lê `<raiz>/conferidos/<onda>/**/*.md` (o portão `conferir_onda.py --aprovar` os copia para lá), com a
-mesma lista de documentos e o mesmo tópico do `recortar_trechos.py` (título `## `, ou o do `--nivel`; antes
-do primeiro, o tópico "(abertura)"; título repetido desambiguado do mesmo jeito), para que `fonte:
+mesma lista de documentos e o mesmo tópico do `recortar_trechos.py` (título `## `, ou o do `--nivel`; título
+acima do corte com corpo é tópico próprio; antes do primeiro, o tópico "(abertura)"; título repetido
+desambiguado do mesmo jeito) — é a mesma função `recortar_texto` —, para que `fonte:
 {documento, topico}` cite sempre um trecho que existe. `manifesto.json`, `*.report.json`, `lote-*.md` e `*.assets/` não são
 documentos e são pulados.
 

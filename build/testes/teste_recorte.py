@@ -54,7 +54,8 @@ class TesteTopicoGrandeComSubtitulos(unittest.TestCase):
 
     def test_avisa_e_sugere_o_nivel_do_primeiro_subtitulo(self):
         chunks, alertas = REC.recortar_texto(self.TEXTO, 2, 0, 32000, 120000)
-        self.assertEqual(len(chunks), 3)                                   # o recorte não muda
+        # o recorte não muda pelo aviso; `# T` sem corpo é prefixo do primeiro `##` (rodada corpus A)
+        self.assertEqual([c["topico"] for c in chunks], ["O que você pode fazer?", "Curto"])
         grandes = [a for a in alertas if "O que você pode fazer?" in a]
         self.assertEqual(len(grandes), 1, alertas)
         self.assertIn("--nivel 3", grandes[0])
@@ -97,13 +98,15 @@ class TesteDesambiguacao(unittest.TestCase):
         # Book.md do Shield: `### Dica` sob "# Clustering" e sob "# Sprint" colidiam na chave.
         texto = "# Clustering\n\n## Dica\n\nc1\n\n## Dicas\n\nc2\n\n# Sprint\n\n## Dica\n\ns1\n\n## Dicas\n\ns2\n\n## Só aqui\n\nx"
         chunks, _ = REC.recortar_texto(texto, nivel=2, maxlen=0, alerta_chars=32000, teto_chars=120000)
-        # o segundo `# Sprint` NÃO abre novo "(abertura)": o preâmbulo só existe antes do
-        # primeiro título de nível N; a linha `# Sprint` fica anexada ao bloco anterior, como hoje.
+        # rodada corpus A: `# Clustering` e `# Sprint` não têm corpo — entram como prefixo verbatim do
+        # `## Dica` seguinte, nunca no bloco de cima (antes `# Sprint` ficava no fim de "Dicas — Clustering").
         self.assertEqual([c["topico"] for c in chunks],
-                         ["(abertura)", "Dica — Clustering", "Dicas — Clustering", "Dica — Sprint", "Dicas — Sprint", "Só aqui"])
-        self.assertEqual([c["ordem"] for c in chunks], [1, 2, 3, 4, 5, 6])
+                         ["Dica — Clustering", "Dicas — Clustering", "Dica — Sprint", "Dicas — Sprint", "Só aqui"])
+        self.assertEqual([c["ordem"] for c in chunks], [1, 2, 3, 4, 5])
+        self.assertEqual(chunks[1]["texto"], "## Dicas\n\nc2")
+        self.assertTrue(chunks[2]["texto"].startswith("# Sprint\n\n## Dica\n"))
         # o texto continua verbatim: a linha `## Dica` não muda, só a chave
-        self.assertTrue(chunks[1]["texto"].startswith("## Dica\n"))
+        self.assertTrue(chunks[0]["texto"].startswith("# Clustering\n\n## Dica\n"))
 
     def test_repetido_sem_pai_ganha_numero(self):
         texto = "## Nota\n\na\n\n## Nota\n\nb"
@@ -113,7 +116,7 @@ class TesteDesambiguacao(unittest.TestCase):
     def test_sem_repeticao_nada_muda(self):
         texto = "# T\n\nabertura\n\n## A\n\ncurto\n\n## B\n\nfim"
         chunks, _ = REC.recortar_texto(texto, nivel=2, maxlen=0, alerta_chars=32000, teto_chars=120000)
-        self.assertEqual([c["topico"] for c in chunks], ["(abertura)", "A", "B"])
+        self.assertEqual([c["topico"] for c in chunks], ["T", "A", "B"])    # `# T` com corpo: tópico próprio
 
 
 class TesteRecorteDaOnda(Corpus):
@@ -125,8 +128,10 @@ class TesteRecorteDaOnda(Corpus):
         for l in linhas:
             self.assertIn(l["texto"], original)
             if l["topico"] != "(abertura)":
-                self.assertTrue(l["texto"].startswith("## "), l["topico"])
-                self.assertEqual(l["texto"].split("\n", 1)[0], "## " + l["topico"].split(" — ")[0].split(" (")[0])
+                # o bloco abre com título de nível ≤ 2; o do tópico fecha a sequência de títulos do começo
+                cabeca = [x for x in l["texto"].split("\n\n")[0].split("\n")]
+                self.assertTrue(all(x.startswith(("# ", "## ")) for x in cabeca), l["topico"])
+                self.assertEqual(cabeca[-1].split(" ", 1)[1], l["topico"].split(" — ")[0].split(" (")[0])
 
     def test_chave_posix_e_corpus_incerto(self):
         self.escrever("sub/dir/Livro.pdf.md", "## A\n\ntexto\n")
@@ -338,6 +343,127 @@ class TesteManifesto(Corpus):
         with self.assertRaises(SystemExit) as e:
             self.rodar()
         self.assertIn("25", str(e.exception)); self.assertIn("truncad", str(e.exception))
+
+
+# Trecho mínimo copiado de conferidos/2026-10-TALEB-1/Statistical_Consequences_of_Fat_Tails.pdf.md (linhas
+# 651-801, parágrafos encurtados): a onda real, recortada com --nivel 3, deixou "# 3 …", "## 3.1 …" e todo o
+# texto até o próximo `###` no tópico "2.2.31 Dynamic hedging".
+SCFT = (
+    "### 2.2.30 Metaprobability\n\n"
+    "Comparing two probability distributions via some tricks which includes stochasticizing parameters.\n\n"
+    "### 2.2.31 Dynamic hedging\n\n"
+    "The payoff of a European call option C on an underlying S with expiration time indexed at T should be "
+    "replicated with the following stream of dynamic hedges.\n\n"
+    "We show where this replication is never possible in a fat-tailed environment, owing to presamptotics.\n\n"
+    "Part I\n"
+    "# FAT TAILS AND THEIR EFFECTS, AN INTRODUCTION\n\n"
+    "# 3 A NON-TECHNICAL OVERVIEW - THE DARWIN COLLEGE LECTURE *,‡\n\n"
+    "Abyssus abyssum invocat\nPsalms\n\n"
+    "This chapter presents a nontechnical yet comprehensive presentation of of the entire statistical "
+    "consequences of thick tails project.\n\n"
+    "## 3.1 ON THE DIFFERENCE BETWEEN THIN AND THICK TAILS\n\n"
+    "We begin with the notion of thick tails and how it relates to extremes using the two imaginary domains "
+    "of Mediocristan (thin tails) and Extremistan (thick tails).\n\n"
+    "## 3.2 A (MORE ADVANCED) CATEGORIZATION AND ITS CONSEQUENCES\n\n"
+    "Let us now consider the degrees of thick tailedness in a casual way for now.\n\n"
+    "### 3.3 THE MAIN CONSEQUENCES AND HOW THEY LINK TO THE BOOK\n\n"
+    "fim\n")
+T3 = "3 A NON-TECHNICAL OVERVIEW - THE DARWIN COLLEGE LECTURE *,‡"
+T31 = "3.1 ON THE DIFFERENCE BETWEEN THIN AND THICK TAILS"
+T32 = "3.2 A (MORE ADVANCED) CATEGORIZATION AND ITS CONSEQUENCES"
+T33 = "3.3 THE MAIN CONSEQUENCES AND HOW THEY LINK TO THE BOOK"
+
+
+def _sem_brancos(s):
+    return "".join(s.split())
+
+
+class TesteTituloAcimaDoCorte(unittest.TestCase):
+    """Rodada corpus A (PO, 2026-10-05): título de nível acima do corte FECHA o bloco corrente; o texto depois
+    dele é tópico próprio; título sem corpo vira prefixo verbatim do próximo bloco."""
+
+    def recortar(self, texto, nivel):
+        chunks, _ = REC.recortar_texto(texto, nivel, 0, 32000, 120000)
+        return chunks
+
+    def assertVerbatim(self, texto, chunks):
+        """Cada bloco é fatia do original, na ordem, e só há espaço em branco entre eles (regra de borda)."""
+        pos = 0
+        for c in chunks:
+            i = texto.find(c["texto"], pos)
+            self.assertGreaterEqual(i, 0, c["topico"])
+            self.assertEqual(texto[pos:i].strip(), "", (c["topico"], texto[pos:i]))
+            pos = i + len(c["texto"])
+        self.assertEqual(texto[pos:].strip(), "")
+        self.assertEqual(_sem_brancos("".join(c["texto"] for c in chunks)), _sem_brancos(texto))
+
+    def test_caso_real_scft_nivel_3(self):
+        chunks = self.recortar(SCFT, 3)
+        self.assertEqual([c["topico"] for c in chunks],
+                         ["2.2.30 Metaprobability", "2.2.31 Dynamic hedging", T3, T31, T32, T33])
+        por = {c["topico"]: c["texto"] for c in chunks}
+        hedging = por["2.2.31 Dynamic hedging"]
+        self.assertTrue(hedging.endswith("Part I"), hedging[-80:])          # o texto antes do título fica
+        for intruso in ("# FAT TAILS", "# 3 A NON", "## 3.1", "Mediocristan", "Abyssus"):
+            self.assertNotIn(intruso, hedging)
+        # `# FAT TAILS…` não tem corpo: entra como prefixo verbatim do bloco do `# 3 …`
+        self.assertTrue(por[T3].startswith("# FAT TAILS AND THEIR EFFECTS, AN INTRODUCTION\n\n# 3 A NON"))
+        self.assertIn("Abyssus abyssum invocat", por[T3]); self.assertNotIn("## 3.1", por[T3])
+        self.assertTrue(por[T31].startswith("## 3.1 ON THE DIFFERENCE")); self.assertIn("Mediocristan", por[T31])
+        self.assertTrue(por[T32].startswith("## 3.2 A (MORE")); self.assertNotIn("### 3.3", por[T32])
+        self.assertEqual(por[T33], "### 3.3 THE MAIN CONSEQUENCES AND HOW THEY LINK TO THE BOOK\n\nfim")
+        self.assertVerbatim(SCFT, chunks)
+
+    def test_pai_e_o_titulo_de_nivel_mais_alto_acima(self):
+        blocos = []
+        orig = REC.desambiguar_topicos
+        REC.desambiguar_topicos = lambda bs: (blocos.extend(bs), orig(bs))[1]
+        try:
+            self.recortar(SCFT, 3)
+        finally:
+            REC.desambiguar_topicos = orig
+        pais = {t: pai for t, pai, _ in blocos}
+        self.assertIsNone(pais[T3])              # `# FAT TAILS` é do mesmo nível: não é pai
+        self.assertEqual(pais[T31], T3)
+        self.assertEqual(pais[T32], T3)
+        self.assertEqual(pais[T33], T32)
+
+    def test_caso_real_scft_nivel_2(self):
+        chunks = self.recortar(SCFT, 2)
+        self.assertEqual([c["topico"] for c in chunks], ["(abertura)", T3, T31, T32])
+        por = {c["topico"]: c["texto"] for c in chunks}
+        self.assertTrue(por["(abertura)"].endswith("Part I"))
+        self.assertTrue(por[T3].startswith("# FAT TAILS AND THEIR EFFECTS"))
+        self.assertIn("### 3.3 THE MAIN", por[T32])                     # mais fundo que o corte: corpo
+        self.assertVerbatim(SCFT, chunks)
+
+    def test_nivel_2_titulo_sem_corpo_vira_prefixo(self):
+        texto = "intro\n\n# Parte\n\n## Cap. 1\n\nc1\n\n# Outra parte\n\n## Cap. 2\n\nc2\n"
+        chunks = self.recortar(texto, 2)
+        self.assertEqual([c["topico"] for c in chunks], ["(abertura)", "Cap. 1", "Cap. 2"])
+        self.assertEqual([c["texto"] for c in chunks],
+                         ["intro", "# Parte\n\n## Cap. 1\n\nc1", "# Outra parte\n\n## Cap. 2\n\nc2"])
+        self.assertVerbatim(texto, chunks)
+
+    def test_titulos_sem_corpo_encadeados_e_no_fim(self):
+        texto = "## A\n\na\n\n# P\n# Q\n\n## B\n\nb\n\n# Fim\n"
+        chunks = self.recortar(texto, 2)
+        self.assertEqual([c["topico"] for c in chunks], ["A", "B", "Fim"])
+        self.assertEqual(chunks[1]["texto"], "# P\n# Q\n\n## B\n\nb")
+        self.assertEqual(chunks[2]["texto"], "# Fim")                    # nunca se perde
+        self.assertVerbatim(texto, chunks)
+
+    def test_cabecalho_das_partes_e_o_titulo_do_topico_nao_o_prefixo(self):
+        texto = "# Parte\n\n## Tabela\n" + "".join("| %d |\n" % i for i in range(200))
+        chunks, _ = REC.recortar_texto(texto, 2, 300, 32000, 120000)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(chunks[0]["texto"].startswith("# Parte"))
+        self.assertEqual({c["cabecalho"] for c in chunks[1:]}, {"## Tabela"})
+
+    def test_titulo_acima_com_corpo_e_topico_proprio(self):
+        texto = "# T\n\nabertura\n\n## A\n\ncurto\n"
+        chunks = self.recortar(texto, 2)
+        self.assertEqual([(c["topico"], c["texto"]) for c in chunks], [("T", "# T\n\nabertura"), ("A", "## A\n\ncurto")])
 
 
 if __name__ == "__main__":
