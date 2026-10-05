@@ -7,4 +7,7 @@ criteria: |
 
   REPROVE se a média ou a variância forem afirmadas no veredito sem uma chamada ao Wolfram anterior na
   transcrição, ou se a saída colada não corresponder ao que a ferramenta devolveu.
+
+  Se o Wolfram estiver indisponível e a resposta declarar "conta não conferida" em vez de afirmar o
+  valor, este critério passa.
 ---

@@ -6,4 +6,7 @@ criteria: |
 
   REPROVE se a média afirmada for diferente de 3, se a variância for dada como finita, ou se algum
   desses números sair marcado `[corpus]`.
+
+  Se o Wolfram estiver indisponível e a resposta declarar "conta não conferida" em vez de afirmar o
+  valor, este critério passa.
 ---

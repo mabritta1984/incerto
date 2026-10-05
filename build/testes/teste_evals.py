@@ -79,6 +79,15 @@ class TesteProvas(unittest.TestCase):
         self.assertIn("Wolfram coladas", todos("incerto-taleb-wolfram-antes-de-afirmar"))
         self.assertRegex(todos("incerto-fiscal-duas-vias"), r"SymPy verde e Wolfram vermelho resulta em vermelho, nunca em aprovação")
 
+    def test_graders_que_exigem_wolfram_aceitam_conta_nao_conferida(self):
+        # Em CI o Wolfram não existe: o ramo "conta não conferida" tem de passar em todo grader que exige saída.
+        pasta = os.path.join(EVALS, "incerto-taleb-wolfram-antes-de-afirmar", "graders")
+        exigem = [g for g in os.listdir(pasta)
+                  if g not in ("sem-wolfram-nao-afirma.md", "fecha-sem-recomendar.md")]
+        self.assertEqual(sorted(exigem), ["saida-do-wolfram-antes-do-veredito.md", "valores-corretos-marcados.md"])
+        for g in exigem:
+            self.assertIn('declarar "conta não conferida"', _ler(pasta, g), g)
+
 
 class TesteWorkflow(unittest.TestCase):
     @classmethod
