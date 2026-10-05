@@ -97,7 +97,8 @@ python3 skills/lavra/scripts/ingerir_trechos.py --entrada _esteira/incerto/trech
 python3 skills/lavra/scripts/ingerir_trechos.py --verificar
 ```
 
-Candidatos a `:Equacao` em staging:
+Candidatos a `:Equacao` em staging (se o recorte usou `--nivel N`, a extração usa o mesmo `--nivel N`: o
+tópico citado tem de ser o de um trecho, e ela recusa nível diferente do manifesto do recorte):
 
 ```
 python3 skills/lavra/scripts/extrair_equacoes.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/equacoes-<onda>.jsonl
@@ -108,7 +109,8 @@ informado"), trechos, equações parseáveis sobre o total e cada perda declarad
 
 **Pare se** o recorte abortar (tópico acima de `--teto-chars`) ou recusar a saída já existente, se a ingestão
 sair com 1 (linha recusada) ou o `--verificar` sair com 1 (duplicata, embedding fora da dimensão), ou se a
-extração recusar sobrescrever `equacoes-<onda>.jsonl` com conteúdo diferente.
+extração recusar sobrescrever `equacoes-<onda>.jsonl` com conteúdo diferente ou um `--nivel` diferente do
+recorte.
 
 ### 5. Aplicar os momentos
 

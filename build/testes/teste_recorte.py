@@ -308,6 +308,13 @@ class TesteManifesto(Corpus):
         self.assertEqual(REC.sha256_trechos(a), REC.sha256_trechos(b))
         self.assertNotEqual(REC.sha256_trechos(a), REC.sha256_trechos([{"documento": "d.md", "texto": "y", "ordem": 1}]))
 
+    def test_manifesto_declara_o_nivel_do_recorte(self):
+        # I5: a extração de equações confere o `nivel` daqui para citar o mesmo tópico que o trecho
+        self.escrever("A.pdf.md", "## A\n\n### B\n\ntexto\n")
+        self.rodar("--nivel", "3")
+        m = json.loads(ler(REC.caminho_manifesto(self.saida)))
+        self.assertEqual([e["nivel"] for e in m["execucoes"]], [3])
+
     def test_segunda_execucao_anexa(self):
         os.makedirs(os.path.dirname(self.saida))
         self.assertEqual(REC.registrar_execucao(REC.caminho_manifesto(self.saida), {"nivel": 2}), 1)

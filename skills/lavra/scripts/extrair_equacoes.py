@@ -3,9 +3,9 @@
 """Equações display (`$$…$$`) dos documentos aprovados pelo PO → candidatos a `:Equacao` em staging — JSONL.
 
 Lê `<raiz>/conferidos/<onda>/**/*.md` (o portão `conferir_onda.py --aprovar` os copia para lá), com a
-mesma lista de documentos e o mesmo tópico do `recortar_trechos.py` (título `## `; antes do primeiro, o
-tópico "(abertura)"; título repetido desambiguado do mesmo jeito), para que `fonte: {documento, topico}`
-cite sempre um trecho que existe. `manifesto.json`, `*.report.json`, `lote-*.md` e `*.assets/` não são
+mesma lista de documentos e o mesmo tópico do `recortar_trechos.py` (título `## `, ou o do `--nivel`; antes
+do primeiro, o tópico "(abertura)"; título repetido desambiguado do mesmo jeito), para que `fonte:
+{documento, topico}` cite sempre um trecho que existe. `manifesto.json`, `*.report.json`, `lote-*.md` e `*.assets/` não são
 documentos e são pulados.
 
 "Parseável" (decisão 2 do PO, 28/09) é estrito, porque um parse errado em silêncio é o pior desfecho:
@@ -28,7 +28,11 @@ documentos e são pulados.
 Perda é ⚠️ com o LaTeX preservado como veio; nunca some.
 
 Uso:
-  python3 extrair_equacoes.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/equacoes-<onda>.jsonl
+  python3 extrair_equacoes.py --raiz <corpus> --onda <onda> --saida _esteira/incerto/equacoes-<onda>.jsonl \
+      [--nivel 2]
+`--nivel` é o nível do título que define o tópico (default 2), o MESMO do `recortar_trechos.py` da onda: se
+o manifesto do recorte (`trechos-<onda>.manifesto.json`, na pasta da `--saida`) existe e registra outro
+`nivel`, a extração recusa (o tópico citado não seria o de trecho nenhum).
 
 Saída: um candidato por linha (`status: "staging"`, `nome` = `<documento>#<ordem>` até o PO renomear,
 `latex`, `srepr`, `simbolos`, `variaveis`, `forma` — `algebrica` com `=`, `funcional` sem `=`, `perda` —,
@@ -321,11 +325,11 @@ def _parsear(latex):
             "simbolos": sorted((s.name for s in expr.free_symbols), key=_bytes)}
 
 
-def equacoes_do_documento(md, documento):
-    """Um registro por bloco `$$…$$` não vazio: `documento`, `topico` (o do recorte), `ordem` (1, 2, … no
-    documento) e `latex` (o conteúdo do bloco, sem os espaços das pontas)."""
+def equacoes_do_documento(md, documento, nivel=2):
+    """Um registro por bloco `$$…$$` não vazio: `documento`, `topico` (o do recorte no mesmo `nivel` de título),
+    `ordem` (1, 2, … no documento) e `latex` (o conteúdo do bloco, sem os espaços das pontas)."""
     infinito = float("inf")
-    trechos, _ = recortar_trechos.recortar_texto(md, 2, 0, infinito, infinito, infinito)
+    trechos, _ = recortar_trechos.recortar_texto(md, nivel, 0, infinito, infinito, infinito)
     eqs = []
     for trecho in trechos:
         for m in re.finditer(r"\$\$(.*?)\$\$", trecho["texto"], re.S):
@@ -350,6 +354,16 @@ def candidato(eq, onda):
             "forma": forma(r), "fonte": {"documento": eq["documento"], "topico": eq["topico"]}}
 
 
+def niveis_do_recorte(dir_esteira, onda):
+    """Os `nivel` das execuções do manifesto do recorte da onda (`<dir_esteira>/trechos-<onda>.manifesto.json`),
+    ou None se ele não existe."""
+    caminho = recortar_trechos.caminho_manifesto(os.path.join(dir_esteira, "trechos-%s.jsonl" % onda))
+    if not os.path.exists(caminho):
+        return None
+    with io.open(caminho, encoding="utf-8") as f:
+        return [e.get("nivel") for e in json.load(f).get("execucoes", [])]
+
+
 def main(argv=None):
     if hasattr(sys.stdout, "reconfigure"):
         try:
@@ -360,6 +374,8 @@ def main(argv=None):
     ap.add_argument("--raiz", required=True, help="raiz do corpus (a pasta que contém `conferidos/`)")
     ap.add_argument("--onda", required=True, help="onda: lê <raiz>/conferidos/<onda>/")
     ap.add_argument("--saida", required=True, help="JSONL de candidatos, ex.: _esteira/incerto/equacoes-<onda>.jsonl")
+    ap.add_argument("--nivel", type=int, default=2, help="nível do título do tópico (default 2: '## '); o mesmo "
+                                                            "do recorte_trechos.py da onda")
     args = ap.parse_args(argv)
     if not recortar_trechos.RE_ONDA.match(args.onda) or ".." in args.onda:
         ap.error("--onda inválida: use ^[A-Za-z0-9][A-Za-z0-9._-]*$ sem '..'")
@@ -367,11 +383,18 @@ def main(argv=None):
     if not os.path.isdir(dir_onda):
         sys.exit("não existe %s — rode `conferir_onda.py --aprovar` antes" % dir_onda)
 
+    # o tópico da `fonte` tem de ser o de um trecho que existe: o recorte da onda na mesma esteira manda
+    niveis = niveis_do_recorte(os.path.dirname(os.path.abspath(args.saida)), args.onda)
+    if niveis is not None and any(n != args.nivel for n in niveis):
+        sys.exit("--nivel %d diverge do recorte desta onda (nivel %s no manifesto de trechos-%s) — extraia com o "
+                 "mesmo --nivel do recortar_trechos.py, ou o tópico citado não será o de trecho nenhum"
+                 % (args.nivel, ", ".join(map(str, niveis)), args.onda))
+
     cands = []
     for caminho, doc, _ in recortar_trechos.listar_documentos(dir_onda):
         with io.open(caminho, encoding="utf-8", newline="") as f:
             md = f.read()
-        cands += [candidato(eq, args.onda) for eq in equacoes_do_documento(md, doc)]
+        cands += [candidato(eq, args.onda) for eq in equacoes_do_documento(md, doc, args.nivel)]
     texto = "".join(json.dumps(c, sort_keys=True, ensure_ascii=False) + "\n" for c in cands)
 
     estado = "novo"

@@ -216,9 +216,9 @@ class TesteCLI(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.raiz)
 
-    def rodar(self, onda=ONDA, saida=None):
+    def rodar(self, onda=ONDA, saida=None, *extra):
         with contextlib.redirect_stdout(io.StringIO()):
-            return EQ.main(["--raiz", self.raiz, "--onda", onda, "--saida", saida or self.saida])
+            return EQ.main(["--raiz", self.raiz, "--onda", onda, "--saida", saida or self.saida] + list(extra))
 
     def linhas(self):
         with io.open(self.saida, encoding="utf-8", newline="") as f:
@@ -250,6 +250,29 @@ class TesteCLI(unittest.TestCase):
         self.assertIn(r"\tag{4}", tc["latex"])                 # LaTeX preservado como veio
         for linha in texto.splitlines():
             self.assertEqual(linha, json.dumps(json.loads(linha), sort_keys=True, ensure_ascii=False))
+
+    def test_nivel_do_topico_e_o_do_recorte(self):
+        # I5: `fonte.topico` tem de citar um trecho que existe — o recorte com `--nivel 3` corta em `### `
+        md = "## Parte\n\n### Kelly\n\n$$f = p$$\n"
+        self.assertEqual([e["topico"] for e in equacoes_do_documento(md, "X.pdf.md")], ["Parte"])
+        self.assertEqual([e["topico"] for e in equacoes_do_documento(md, "X.pdf.md", 3)], ["Kelly"])
+        manifesto = os.path.join(os.path.dirname(self.saida), "trechos-%s.manifesto.json" % ONDA)
+        os.makedirs(os.path.dirname(manifesto))
+        for niveis, args, aceita in (([2], (), True), ([3], ("--nivel", "3"), True), ([3], (), False),
+                                     ([2], ("--nivel", "3"), False), ([3, 2], ("--nivel", "3"), False)):
+            with io.open(manifesto, "w", encoding="utf-8") as f:
+                json.dump({"versao": 1, "execucoes": [{"execucao": i + 1, "nivel": n} for i, n in enumerate(niveis)]}, f)
+            if os.path.exists(self.saida):
+                os.remove(self.saida)
+            if aceita:
+                self.assertEqual(self.rodar(ONDA, None, *args), 0, (niveis, args))
+            else:
+                with self.assertRaises(SystemExit, msg=(niveis, args)) as c:
+                    self.rodar(ONDA, None, *args)
+                self.assertIn("nivel", str(c.exception.code))
+                self.assertFalse(os.path.exists(self.saida))
+        os.remove(manifesto)                                # sem recorte na esteira, vale o --nivel declarado
+        self.assertEqual(self.rodar(ONDA, None, "--nivel", "3"), 0)
 
     def test_forma_funcional_sem_igual(self):
         conf = os.path.join(self.raiz, "conferidos", "f")
