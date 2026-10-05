@@ -163,6 +163,47 @@ class TesteParse(unittest.TestCase):
         self.assertEqual(parsear_latex(r"a = b = c")["motivo"], "nao_suportado:relacao_encadeada")
         self.assertFalse(parsear_latex(r"1 \le x \le n")["ok"])     # o SymPy recusa (TypeError): `strict`
 
+    def test_equacao_19_taleb_nao_colapsa_em_false(self):
+        # Convex_Responses.pdf, eq. 19: o SymPy colapsa a cadeia em BooleanFalse; tem de ser perda declarada
+        r = parsear_latex(r"P = \int_{a}^{b} p(x)dx = \int_{y(a)}^{f(b)} p(x(y)) \left| \frac{dx}{dy} \right| dy \tag{19}")
+        self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:relacao_encadeada")
+        self.assertIsNone(r["srepr"])
+
+    def test_cadeia_de_relacoes_distintas_e_perda(self):
+        for latex in (r"a = b = c", r"a < b \leq c", r"a \approx b = c", r"a \neq b \ge c", r"1 \le x \le n"):
+            with self.subTest(latex=latex):
+                r = parsear_latex(latex)
+                self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:relacao_encadeada")
+
+    def test_relacao_unica_com_modulo_e_comando_left_nao_e_cadeia(self):
+        self.assertTrue(parsear_latex(r"y = \left| x \right|")["ok"])
+        self.assertTrue(parsear_latex(r"a \le b")["ok"])
+
+    def test_igualdade_que_colapsa_em_booleano_e_perda(self):
+        # `1 = 2` e `x = x` o SymPy decide (false/true): não é uma equação, é um valor de verdade; nunca ok=True
+        for latex in (r"1 = 2", r"x = x", r"1 = 1"):
+            with self.subTest(latex=latex):
+                r = parsear_latex(latex)
+                self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:booleano")
+                self.assertIsNone(r["srepr"])
+
+    def test_resultado_booleano_nunca_vira_ok(self):
+        from sympy import true, false, Symbol, And
+        for valor in (true, false, And(Symbol("a"), Symbol("b"))):
+            with self.subTest(valor=valor), mock.patch("sympy.parsing.latex.parse_latex", return_value=valor):
+                r = parsear_latex(r"a + b")
+                self.assertFalse(r["ok"]); self.assertEqual(r["motivo"], "nao_suportado:booleano")
+
+    def test_corpus_de_testes_nunca_tem_ok_com_srepr_booleano(self):
+        import ast
+        with open(os.path.join(RAIZ, "build", "testes", "teste_extrair_equacoes.py"), encoding="utf-8") as f:
+            literais = {n.value for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.Constant)
+                        and isinstance(n.value, str) and 0 < len(n.value) < 300 and "\n" not in n.value}
+        self.assertGreater(len(literais), 50)
+        for latex in sorted(literais):
+            r = parsear_latex(latex)
+            self.assertFalse(r["ok"] and r["srepr"] in ("true", "false"), latex)
+
     def test_subscrito_simples_nao_engole_o_comando_seguinte(self):
         # sem chaves, o parser lê `P_d \times A` como Symbol('P_{dtimes}')·A — a conferência pegaria, mas é parseável
         r = parsear_latex(r"P_d \times A")

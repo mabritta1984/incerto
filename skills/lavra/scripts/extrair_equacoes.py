@@ -144,6 +144,24 @@ def _depois_do_expoente(t):
     return None
 
 
+# operador de relação: o parse lê `a = b = c` como `Equality(Equality(a, b), c)` e o SymPy o colapsa em
+# `true`/`false` quando decide (`1 = 2`, `p(x)dx = p(x)dx`): a cadeia tem de ser vista no LaTeX, antes do parse
+_RELACAO = re.compile(r"[=<>]|\\(?:leq?|geq?|neq?|lt|gt|approx|equiv|sim|simeq|ll|gg|propto)(?![A-Za-z])")
+
+
+def _relacoes_no_nivel_zero(t):
+    """Quantos operadores de relação há fora de qualquer chave (`_{…}`, `^{…}`, `\\frac{…}{…}`)."""
+    nivel, texto = 0, []
+    for c in t:
+        if c == "{":
+            nivel += 1
+        elif c == "}":
+            nivel = max(nivel - 1, 0)
+        elif nivel == 0:
+            texto.append(c)
+    return len(_RELACAO.findall("".join(texto)))
+
+
 def _preparar(latex):
     """Devolve (texto com marcas, [(tipo, nome canônico)], motivo). Tipo `simbolo` (composto) ou `funcao`."""
     for padrao in NAO_SUPORTADOS:
@@ -196,6 +214,8 @@ def _preparar(latex):
     m = re.search(RESIDUAIS, _RE_MARCA.sub(" ", t))
     if m:
         return None, [], "nao_suportado:%s" % m.group(0)
+    if _relacoes_no_nivel_zero(t) > 1:
+        return None, [], "nao_suportado:relacao_encadeada"
     return t, marcas, None
 
 
@@ -258,7 +278,7 @@ def parsear_latex(latex):
 
 
 def _parsear(latex):
-    from sympy import Function, Max, Min, Symbol, srepr
+    from sympy import Expr, Function, Max, Min, Symbol, srepr
     from sympy.core.function import AppliedUndef
     from sympy.core.relational import Relational
     from sympy.parsing.latex import parse_latex
@@ -316,9 +336,13 @@ def _parsear(latex):
         return Function(funcoes_de.get(nome, _canonico(nome)))(*f.args)
     expr = expr.replace(lambda e: isinstance(e, AppliedUndef), funcao_nova)
 
-    for no in (expr,) + tuple(expr.atoms(Relational)):
-        if isinstance(no, Relational) and any(isinstance(a, Relational) for a in no.args):
-            return _perda("nao_suportado:relacao_encadeada")
+    # só `Relational` ou `Expr` é uma equação: `true`/`false` (relação decidida pelo SymPy) e as funções
+    # booleanas (`And`, …) são valor de verdade; um `srepr` `true`/`false` nunca é ok
+    if not isinstance(expr, (Relational, Expr)):
+        return _perda("nao_suportado:booleano")
+    if any(isinstance(no, Relational) and any(isinstance(a, Relational) for a in no.args)
+           for no in (expr,) + tuple(expr.atoms(Relational))):
+        return _perda("nao_suportado:relacao_encadeada")        # rede de segurança: o pré-parse já a recusa
     nomes = {s.name for s in expr.atoms(Symbol)} - {"+", "-", "+-"}       # `+-` é o lado de um `Limit`
     nomes |= {type(f).__name__ for f in expr.atoms(AppliedUndef)}
     tokens = _tokens(t, marcas)
