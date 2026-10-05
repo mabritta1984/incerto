@@ -1,6 +1,6 @@
 {
   "name": "incerto",
-  "version": "0.1.0-dev",
+  "version": "0.1.0",
   "description": "Especialista de investimentos baseado em Nassim Taleb: corpus em grafo (Neo4j) com equações como nós de primeira classe, fiscal de duas vias (SymPy e Wolfram) antes de qualquer aprovação, e dados do mercado brasileiro (BCB e B3) para análises de antifragilidade e caudas gordas.",
   "keywords": ["taleb", "antifragilidade", "caudas-gordas", "equacoes", "neo4j", "wolfram", "mercado-brasileiro"]
 }

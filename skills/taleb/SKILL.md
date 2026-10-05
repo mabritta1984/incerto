@@ -3,7 +3,7 @@ name: taleb
 description: >
   Especialista de investimentos do Incerto, baseado em Nassim Taleb: diagnostica exposição, fragilidade, caudas gordas, convexidade e ergodicidade de ativos e carteiras com dados do mercado brasileiro (SGS do BCB e COTAHIST da B3), citando a procedência de cada afirmação ([corpus], [staging] ou [externo]) e conferindo no Wolfram toda conta fechada antes de afirmá-la. Use quando o PO pedir para "analisar exposição" de um ativo ou carteira, perguntar se algo "é frágil?" ou antifrágil, pedir para avaliar um "barbell", olhar a "cauda" de uma série, medir Extremistão × Mediocristão (kappa, Hill, razão máximo/soma), comparar crescimento temporal e de ensemble, ou quando aparecer o comando /taleb. Descreve a exposição; nunca recomenda ativo.
 metadata:
-  version: "0.1.0-dev"
+  version: "0.1.0"
 ---
 
 # Taleb — exposição, caudas e convexidade sobre dados brasileiros
@@ -36,9 +36,11 @@ fechado, variáveis, validades, derivações com `verificado_por` e `aceites_po`
 devolve trechos) e `situacao_camada` (corpus, database, contagem dos nós aprovados por rótulo, número de
 trechos e estado dos índices — **não** diz qual onda está aprovada). **Sem o MCP** — não instalado, grafo
 fora do ar ou nenhuma equação aprovada — **toda afirmação de corpus é `[externo]`**, e a fonte é a linha
-`fonte:` de `references/doutrina.md` ou de `references/heuristicas.md`. Na versão 0.1.0-dev o corpus ainda
-não foi convertido (a primeira onda é a Task 19): até lá, doutrina e heurísticas são `[externo]` com o livro
-de Taleb nomeado.
+`fonte:` de `references/doutrina.md` ou de `references/heuristicas.md`. Na versão 0.1.0 a onda
+`2026-10-TALEB-1` está aprovada e o MCP serve 76 equações, 30 conceitos e 19 heurísticas do corpus
+`incerto`; o que ele devolve é `[corpus]`. As linhas `fonte:` de `references/doutrina.md` e
+`references/heuristicas.md` continuam `[externo]` (o livro de Taleb nomeado) até apontarem um nó aprovado:
+o verbete não promove a marca, só o MCP.
 
 **`[staging]` vem só dos arquivos locais da esteira, nunca do MCP**: um candidato de
 `_esteira/incerto/equacoes-<onda>.jsonl` (com o rótulo que `_esteira/incerto/decisoes-<onda>.jsonl` lhe dá
@@ -50,7 +52,10 @@ Os números do `relatorio.py` saem marcados por equação: os `EQ_*` do script s
 `crescimento_ensemble`). Monte o mapa rótulo → status — `"aprovado"` se `ler_equacao(<rótulo>)` achou a
 equação; `"staging"` só se o rótulo está nos arquivos locais da esteira e o MCP não a achou — num JSON e
 passe-o com `--status-equacoes <arquivo.json>`; sem ele, tudo sai `[externo]`. Não promova marca: um
-número `[externo]` continua `[externo]` na sua prosa.
+número `[externo]` continua `[externo]` na sua prosa. Na onda `2026-10-TALEB-1`, dos seis rótulos só
+`assimetria_convexidade` é `:Equacao` aprovada; `kappa`, `hill`, `razao_max_soma`, `crescimento_temporal` e
+`crescimento_ensemble` não estão aprovados, e os números deles saem `[externo]` (ou `[staging]`, pela
+esteira local).
 
 ## Rito
 

@@ -31,8 +31,17 @@ em Nassim Taleb**; usar o **Wolfram** para validar equações e análises matem�
 | A6 | Fora do Python só `sympy` (+ `mpmath`, `antlr4` transitivas), importados dentro de função, nos arquivos permitidos; análises em biblioteca padrão (`statistics`, `math`, `random`) | `numpy`/`pandas` |
 | A7 | Wolfram entra **pelo MCP do agente**, não por biblioteca Python: o agente roda o código, e `registrar_prova.py` grava a saída verbatim como prova `via: wolfram`; sem credencial Wolfram em script | `wolframclient` |
 | A8 | Dados BR: BCB SGS (Selic 11, CDI 12, meta 432, IPCA 433, PTAX 1, Ibovespa 7) e **COTAHIST da B3** (arquivo anual, largura fixa); cache em disco; testes offline com fixtures; a política de rede do ambiente precisa liberar `api.bcb.gov.br` e `bvmf.bmfbovespa.com.br` | `brapi`/Yahoo |
-| A9 | Ondas do Taleb em três: `2026-10-TALEB-1` **técnica** (Statistical_Consequences, Convex_Responses, Hidden_Risks, Tail_Option_Prices, Bitcoin), `-2` **Incerto** (Fooled, Black_Swan, Anti_Fragile, Skin), `-3` **vizinhança** (Dynamic_Hedging, Safe_Haven [Spitznagel], Volatility_Surface [Gatheral], Poker_Face [Brown], Basic_Laws [Cipolla]) — a 0.1.0 roda só a primeira | uma onda só |
+| A9 | Ondas do Taleb em três: `2026-10-TALEB-1` **técnica**, 6 documentos (Statistical_Consequences, Convex_Responses, Hidden_Risks, Tail_Option_Prices, Bitcoin, Dynamic_Hedging), `-2` **Incerto** (Fooled, Black_Swan, Anti_Fragile, Skin), `-3` **vizinhança** (Safe_Haven [Spitznagel], Volatility_Surface [Gatheral], Poker_Face [Brown], Basic_Laws [Cipolla]) — a 0.1.0 roda só a primeira (emendada em 05/10, ver abaixo) | uma onda só |
 | A10 | O especialista é uma **estação** (`skills/taleb/SKILL.md`), não um agente: responde só com marcação `[corpus]` (aprovado) / `[staging]` / `[externo]`, roda os scripts de análise e **passa toda conta fechada pelo Wolfram antes de afirmar** | agente separado |
+
+**Emenda de 05/10/2026 (A9, decisão do PO).** A redação de 04/10 punha Dynamic_Hedging na onda `-3`,
+**vizinhança**, ao lado de Spitznagel, Gatheral, Brown e Cipolla. Errado: *Dynamic Hedging* (1997) é livro do
+próprio Taleb, não vizinhança. Por decisão do PO de 05/10 ele entrou na onda `2026-10-TALEB-1`, que passou de
+5 para 6 documentos (cópia para `originais/TALEB/` com md5 idêntico ao de `taleb_originais/`). A onda `-3`
+fica com Safe_Haven, Volatility_Surface, Poker_Face e Basic_Laws. A linha A9 acima já traz a redação
+corrigida. Em "Fora da 0.1.0", "opções e superfície de volatilidade" seguem fora como funcionalidade da
+estação; o texto e as equações de Dynamic_Hedging passaram pela mesma esteira (recorte, extração, fiscal)
+que os outros cinco documentos da onda.
 
 ## O que o Incerto 0.1.0 entrega
 

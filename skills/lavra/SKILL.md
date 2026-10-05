@@ -3,7 +3,7 @@ name: lavra
 description: >
   Rito por onda do Incerto: leva os PDFs de uma fonte no bucket (originais/<fonte>/) até um corpus conferido, recortado, ingerido no Neo4j, extraído em equações, fiscalizado em duas vias (SymPy e Wolfram) e aprovado pelo PO — em oito passos na ordem, cada um com o comando exato e a condição de parada, e com a decisão do PO antes de todo passo que gasta modelo ou escreve no Aura. Use quando o PO pedir para "rodar uma onda", "converter os PDFs do Taleb", conferir ou aprovar uma onda do mineiro, recortar ou ingerir os conferidos, rodar a rodada do fiscal ou montar o bloco de decisão da rodada, ou quando aparecer o comando /lavra. Não converte PDF (isso é do mineiro), não define o modelo do grafo (grafo-incerto.md) nem o protocolo Wolfram (fiscal.md): conduz a ordem e as decisões.
 metadata:
-  version: "0.1.0-dev"
+  version: "0.1.0"
 ---
 
 # Lavra — uma onda, do original ao aprovado

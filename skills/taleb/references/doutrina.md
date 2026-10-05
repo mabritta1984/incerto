@@ -2,9 +2,10 @@
 
 Um verbete por conceito, em paráfrase própria (nunca citação longa). Cada verbete diz o que o conceito
 afirma, como ele aparece no diagnóstico da estação e de onde vem. A linha `fonte:` é obrigatória: enquanto
-nenhuma onda do corpus estiver conferida, ela é `[externo]` e nomeia o livro de Taleb em que o tema é
-desenvolvido; quando a onda 1 tiver o trecho (Task 19), passa a `(documento, tópico)` dos `conferidos/`, e a
-afirmação do especialista que se apoiar no verbete passa de `[externo]` a `[corpus]` ou `[staging]`.
+o verbete não apontar um nó aprovado, ela é `[externo]` e nomeia o livro de Taleb em que o tema é
+desenvolvido. A onda `2026-10-TALEB-1` está conferida e aprovada (0.1.0), mas nenhuma linha `fonte:` abaixo
+foi ainda trocada por `(documento, tópico)` de um nó aprovado; quando for, a afirmação do especialista que se
+apoiar no verbete passa de `[externo]` a `[corpus]`. Até lá, o `[corpus]` vem só do MCP (`ler_conceito`).
 
 Quem consome: `SKILL.md` (passo 2 do rito) e `heuristicas.md` (campo `sustenta:`, que cita os títulos
 abaixo literalmente).

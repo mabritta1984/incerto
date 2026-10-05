@@ -1,4 +1,4 @@
-# regras-do-incerto — fonte única (v0.1.0-dev)
+# regras-do-incerto — fonte única (v0.1.0)
 
 Este arquivo é a **casa única** das regras comuns às skills, agentes e scripts do Incerto. Ele **não é
 lido em runtime**: a seção entre os marcadores abaixo é **injetada** por `build/injetar_regras.py`

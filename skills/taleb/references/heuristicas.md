@@ -7,8 +7,8 @@ Cada heurística liga um diagnóstico numérico da estação a uma consequência
   `fracao_segura` (`or`/`and`/`not` de comparações simples são aceitos). O teste da estação passa toda
   condição por `fiscal.relacional_parseia(condicao, ["kappa", "alpha", "H", "fracao_segura"])` (pode levantar `TempoEsgotado` numa condição patológica);
 - `sustenta:` os conceitos de `doutrina.md` que a justificam, pelo título do verbete;
-- `fonte:` como na doutrina — `[externo]` com o livro enquanto nenhuma onda estiver conferida; `(documento,
-  tópico)` dos `conferidos/` depois da Task 19.
+- `fonte:` como na doutrina — `[externo]` com o livro enquanto a linha não apontar um nó aprovado; `(documento,
+  tópico)` dos `conferidos/` quando apontar (a onda `2026-10-TALEB-1` está aprovada desde a 0.1.0).
 
 Símbolos, com a mesma definição do `relatorio.py`:
 

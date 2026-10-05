@@ -20,10 +20,10 @@ def _json(*partes):
 
 
 class TesteManifesto(unittest.TestCase):
-    def test_plugin_json_nasce_dev(self):
+    def test_plugin_json_na_versao_0_1_0(self):
         p = _json(RAIZ, ".claude-plugin", "plugin.json")
         self.assertEqual(p["name"], "incerto")
-        self.assertEqual(p["version"], "0.1.0-dev")
+        self.assertEqual(p["version"], "0.1.0")
         self.assertIn("Taleb", p["description"])
 
     def test_marketplace_tem_uma_entrada(self):
@@ -31,7 +31,7 @@ class TesteManifesto(unittest.TestCase):
         self.assertEqual(mk["name"], "incerto")
         self.assertEqual([x["name"] for x in mk["plugins"]], ["incerto"])
         self.assertEqual(mk["plugins"][0]["source"], "./")
-        self.assertEqual(mk["plugins"][0]["version"], "0.1.0-dev")
+        self.assertEqual(mk["plugins"][0]["version"], "0.1.0")
 
 
 class TesteRegras(unittest.TestCase):
