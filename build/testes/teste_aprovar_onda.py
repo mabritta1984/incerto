@@ -122,6 +122,35 @@ class TesteGateEquacao(unittest.TestCase):
                          ["equacoes"][0]["status"], "staging")
 
 
+    def test_equacao_que_aplica_e_sem_momento_fechado_nao_e_aprovada(self):
+        # C1: `\mathbb{E}[X] = αL/(α-1)` só com P1 verde saía aprovada — o momento sem prova nenhuma
+        e = cand("pareto#1", r"\mathbb{E}[X] = \frac{\alpha L}{\alpha-1}")
+        fis = [{k: v for k, v in l.items() if k != "ms"} for l in FI.provas([e], [], [], {})]
+        eq = AO.decidir([e], [], [], fis, [])["equacoes"][0]
+        self.assertEqual(eq["status"], "staging")
+        self.assertTrue(any("aplica E/Var sem momento_fechado declarado" in p for p in eq["pendencias"]),
+                        eq["pendencias"])
+        # fiscal sem a linha (antigo ou forjado): a P4 tem de existir, como a do momento declarado
+        eq = AO.decidir([e], [], [], [p1("pareto#1")], [])["equacoes"][0]
+        self.assertEqual(eq["status"], "staging")
+        self.assertIn("sem prova P4 do momento fechado", " ".join(eq["pendencias"]))
+
+    def test_plano_imprime_latex_e_srepr_de_cada_item(self):
+        e = cand("pareto#1", r"\mathbb{E}[X] = \frac{\alpha L}{\alpha-1}")
+        m, f = eq_fixa("m"), eq_fixa("f", latex="x = y", srepr="Equality(Symbol('x'), Symbol('y'))")
+        plano = AO.decidir([e, m, f], [deriv("m", "f")], [{"equacao": "m", "condicao": "x > 0"}],
+                           [p1("pareto#1"), p1("m"), p1("f"), p3("m", "x > 0")], [])
+        texto = "\n".join(AO.linhas_do_plano(plano))
+        for linha in (e["latex"], e["srepr"], "x = y", "Equality(Symbol('x'), Symbol('y'))", "y = x",
+                      "Equality(Symbol('y'), Symbol('x'))"):
+            self.assertIn(linha, texto)
+        blocos = texto.split("\n")
+        for item in ("pareto#1", "f → m", "m / x > 0 → x"):
+            i = [n for n, l in enumerate(blocos) if l.strip().endswith(item) or (" %s" % item) in l][0]
+            vizinhas = "\n".join(blocos[i:i + 6])
+            self.assertIn("LaTeX:", vizinhas, item); self.assertIn("srepr:", vizinhas, item)
+
+
 class TesteGateDerivacao(unittest.TestCase):
     def setUp(self):
         self.eqs = [eq_fixa("m"), eq_fixa("f")]

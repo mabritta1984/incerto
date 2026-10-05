@@ -270,6 +270,25 @@ class TesteP4(unittest.TestCase):
             p4 = self.p4(provas(eqs, [], [], indice(wolfram_momento("pareto#3", v, "Out[1]= alpha", (eqs, [])))))
             self.assertEqual(p4[0]["veredito"], v); self.assertIn("Out[1]= alpha", p4[0]["detalhe"])
 
+    def test_equacao_que_aplica_e_ou_var_sem_momento_fechado_e_indeterminado(self):
+        # `\mathbb{E}[X] = …` é um momento fechado sem declaração: sem a P4 ela sairia só com a P1 verde
+        eqs = [self.cand("pareto#1", r"\mathbb{E}[X] = \frac{\alpha L}{\alpha-1}"),
+               self.cand("pareto#2", r"\operatorname{Var}(X) = s"),
+               self.cand("pareto#3", r"m = \frac{\alpha L}{\alpha - 1}")]
+        self.assertIn("Function('E')", eqs[0]["srepr"]); self.assertIn("Function('Var')", eqs[1]["srepr"])
+        p4 = self.p4(provas(eqs, [], [], {}))
+        self.assertEqual([(l["alvo"], l["equacao"], l["veredito"]) for l in p4],
+                         [("pareto#1", "pareto#1", "indeterminado"), ("pareto#2", "pareto#2", "indeterminado")])
+        for l in p4:
+            self.assertIn("aplica E/Var sem momento_fechado declarado", l["detalhe"])
+            self.assertEqual(sorted(l), ["alvo", "detalhe", "equacao", "ms", "prova", "veredito"])
+        # com o momento declarado, vale a P4 do momento (a prova Wolfram), não a pendência de declaração
+        declarada = [dict(eqs[0], momento_fechado={"media": "alpha*L/(alpha-1)"})]
+        p4 = self.p4(provas(declarada, [], [], {}))
+        self.assertEqual([l["veredito"] for l in p4], ["vermelho"]); self.assertIn("sem prova Wolfram", p4[0]["detalhe"])
+        self.assertTrue(FI.aplica_momento(eqs[0]["srepr"])); self.assertFalse(FI.aplica_momento(eqs[2]["srepr"]))
+        self.assertFalse(FI.aplica_momento(None))
+
     def test_p4_mae_e_filha_repetidas_sao_derivacao_ambigua_em_todas(self):
         ders = self.ders + [dict(self.ders[0], substituicao={"b": "2"})]
         w = wolfram_p2("kelly#1", "kelly#2", "verde", onda=(self.eqs, self.ders))   # válida para a primeira

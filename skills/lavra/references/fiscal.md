@@ -18,6 +18,11 @@ a prova Wolfram verde e concordante. Divergência entre as vias é vermelho, com
 | derivação | toda linha P2 do `fiscal-<onda>.jsonl` (uma por linha de `derivacoes-<onda>.jsonl`) | `mae` + `filha` | `{"prova": "P2", "via": "wolfram", "mae", "filha", "codigo", "saida", "veredito", "impressao"}` |
 | momento fechado | todo candidato de `equacoes-<onda>.jsonl` com `momento_fechado` não vazio (dict, ex.: `{"media": "alpha*L/(alpha-1)"}`) | `equacao` (o `nome` do candidato) | `{"prova": "momento", "via": "wolfram", "equacao", "codigo", "saida", "veredito", "impressao"}` |
 
+Candidato **sem** `momento_fechado` cujo `srepr` aplica `E` ou `Var` (`\mathbb{E}[X] = …`,
+`\operatorname{Var}(X) = …`) afirma um momento que ninguém declarou: a P4 dá `indeterminado` "aplica E/Var
+sem momento_fechado declarado" (chave `equacao`). Não há prova Wolfram a registrar para ele; o caminho é a
+decisão `momento_fechado` do PO (e então a prova acima) ou o aceite da linha.
+
 Uma prova por chave. Um momento fechado com várias entradas (`media`, `variancia`, …) tem **uma** prova,
 cujo código confere todas de uma vez (ver abaixo).
 

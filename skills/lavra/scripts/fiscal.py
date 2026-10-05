@@ -26,8 +26,10 @@ Provas (uma linha por prova; `prova`, `alvo`, `veredito` ∈ verde|vermelho|inde
                  divergem", com o `detalhe` da P2 e a `saida` Wolfram verbatim no `detalhe` (SymPy
                  indeterminado + Wolfram verde também diverge: indeterminado é pauta do PO na Task 11, não da
                  P4); vias iguais → o veredito comum ("vias concordam"). Momento: não há via SymPy; a P4 tem o
-                 veredito da prova Wolfram. Chaves estruturadas da P4: `mae`, `filha` (derivação) ou `equacao`
-                 (momento).
+                 veredito da prova Wolfram. Candidato SEM `momento_fechado` cujo `srepr` aplica `E` ou `Var`
+                 (`aplica_momento`: `\\mathbb{E}[X] = …`, `\\operatorname{Var}(X) = …`) → indeterminado
+                 "aplica E/Var sem momento_fechado declarado" (afirma um momento que ninguém prova). Chaves
+                 estruturadas da P4: `mae`, `filha` (derivação) ou `equacao` (momento).
 `provas_sympy` roda só P1–P3; `provas` roda a tabela `PROVAS` inteira (P1–P4), que é o que a CLI grava.
 
 `provas_wolfram(caminho)`: lê `provas-<onda>.jsonl` (ausente = nenhuma prova) e indexa por
@@ -71,6 +73,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import time
 import tokenize
@@ -268,6 +271,14 @@ def impressao_esperada(chave, equacoes, derivacoes):
     raise ValueError("prova Wolfram desconhecida: %r" % (chave[0],))
 
 
+RE_APLICA_MOMENTO = re.compile(r"Function\('(?:E|Var)'\)")
+
+
+def aplica_momento(srepr):
+    """O `srepr` aplica `E` ou `Var` (marcação explícita de esperança ou variância na extração)?"""
+    return bool(srepr) and bool(RE_APLICA_MOMENTO.search(srepr))
+
+
 def provas_wolfram(caminho):
     """`provas-<onda>.jsonl` indexado por `chave_wolfram`; arquivo ausente = nenhuma prova."""
     if not os.path.exists(caminho):
@@ -372,10 +383,14 @@ def _p4_duas_vias(ctx):
                        % (p2["veredito"], p2["detalhe"], w["saida"]))
     for eq in ctx["equacoes"]:
         momento = eq.get("momento_fechado")
-        if not momento:
-            continue
         nome = eq["nome"]
         chaves = {"alvo": nome, "equacao": nome}
+        if not momento:
+            if aplica_momento(eq.get("srepr")):
+                # `\mathbb{E}[X] = …` afirma um momento fechado: sem declaração não há o que a via Wolfram prove
+                yield dict(chaves, veredito=INDETERMINADO, detalhe="aplica E/Var sem momento_fechado declarado — "
+                           "decida o momento_fechado (que a via Wolfram prova) ou aceite a linha")
+            continue
         declarado = json.dumps(momento, sort_keys=True, ensure_ascii=False)
         w = wolfram.get(("momento", nome))
         motivo = w and _desatualizada(w, ("momento", nome), ctx)

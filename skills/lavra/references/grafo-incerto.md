@@ -93,9 +93,15 @@ nunca passa, com ou sem decisão. Item sem linha do fiscal fica em staging ("sem
 
 | Item | Linhas que contam (todas) | Linha que tem de existir |
 |---|---|---|
-| `:Equacao` | P1 `{equacao}`; toda P3 `{equacao, condicao}` sobre ela; toda P4 de momento `{equacao}` sobre ela | P1; uma P3 por condição de `validades-`; P4 de momento se tem `momento_fechado` |
+| `:Equacao` | P1 `{equacao}`; toda P3 `{equacao, condicao}` sobre ela; toda P4 de momento `{equacao}` sobre ela | P1; uma P3 por condição de `validades-`; P4 de momento se tem `momento_fechado` **ou** se o `srepr` aplica `E`/`Var` |
 | `DERIVA_DE` | P2 `{mae, filha, simbolo, substituicao}` da linha de derivação; P4 `{mae, filha}` | as duas; e mãe e filha aprovadas |
 | `VALIDA_SOB` | P3 `{equacao, condicao}` | a P3; e a equação aprovada |
+
+Equação cujo `srepr` aplica `Function('E')` ou `Function('Var')` (marcação explícita, `\mathbb{E}[X] = …`)
+afirma um momento fechado: sem `momento_fechado` declarado, o fiscal dá P4 `indeterminado` "aplica E/Var sem
+momento_fechado declarado" (`{equacao}`), e ela fica em staging até o PO declarar o momento (que a via
+Wolfram prova) ou aceitar a linha. O plano impresso traz, ao lado de cada item, o LaTeX de origem e o
+`srepr` das equações envolvidas.
 
 Antes do gate, `aprovar_onda.py` refaz o fiscal (`fiscal.provas`) sobre os arquivos atuais e compara com
 `fiscal-<onda>.jsonl`; se diferirem (candidato reextraído, derivação mudada, momento aplicado, prova

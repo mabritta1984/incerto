@@ -10,7 +10,8 @@ grafo — nós, relações, chaves e o Cypher canônico de cada MERGE — é don
 
 Gate (`decidir`, função pura), item a item — TODAS as linhas do fiscal do item têm de passar:
   `:Equacao`    P1 verde; toda P3 sobre ela verde (e toda condição de `validades-` com sua P3); se tem
-                `momento_fechado`, a P4 do momento verde (e toda P4 de momento sobre ela, sempre).
+                `momento_fechado` ou aplica `E`/`Var` (`fiscal.aplica_momento`), a P4 de momento verde (e
+                toda P4 de momento sobre ela, sempre); sem declaração, essa P4 é indeterminado.
   `DERIVA_DE`   a P2 da linha de derivação (mae, filha, simbolo, substituicao) E a P4 (mae, filha) verdes,
                 e as duas pontas promovíveis. Grava `verificado_por: ["sympy@1.14.0", "wolfram"]`.
   `VALIDA_SOB`  a P3 (equacao, condicao) verde e a equação promovível.
@@ -290,7 +291,8 @@ def decidir(equacoes, derivacoes, validades, fiscal_linhas, decisoes):
         pend = [] if p1.get(k) else ["sem prova P1"]
         conds = [v["condicao"] for v in validades if v["equacao"] == nome]
         pend += ["sem prova P3 para a condição %s" % cd for cd in conds if not p3.get((c(nome), c(cd)))]
-        if e.get("momento_fechado") and not p4m.get(k):
+        # momento declarado, ou `E`/`Var` aplicado sem declaração (a P4 dá indeterminado): a P4 tem de existir
+        if (e.get("momento_fechado") or fiscal.aplica_momento(e.get("srepr"))) and not p4m.get(k):
             pend.append("sem prova P4 do momento fechado")
         mais, aceitas = _avaliar(p1.get(k, []) + p3_eq.get(k, []) + p4m.get(k, []), aceites)
         pend += mais
@@ -596,7 +598,20 @@ def gravar(cred, db, plano, corpus, onda, saida=print):
 # --- relato -------------------------------------------------------------------------------------------------
 
 def linhas_do_plano(plano):
+    """O plano para o PO: cada item com o LaTeX de origem e o `srepr` das equações que ele envolve (o PO
+    aprova o que leu, não um nome)."""
     out = []
+    eqs = {l["nome"]: l for l in plano["equacoes"]}
+
+    def formas(*nomes):
+        linhas = []
+        for n in nomes:
+            e = eqs.get(n, {})
+            rotulo = "" if len(nomes) == 1 else "%s " % n
+            linhas += ["           %sLaTeX: %s" % (rotulo, (e.get("latex") or "").replace("\n", " ")),
+                       "           %ssrepr: %s" % (rotulo, e.get("sympy_srepr"))]
+        return linhas
+
     for tipo, rotulo in (("equacoes", "Equacao"), ("deriva_de", "DERIVA_DE"), ("valida_sob", "VALIDA_SOB")):
         linhas = plano[tipo]
         aprov = sum(1 for l in linhas if l["status"] == APROVADO)
@@ -606,6 +621,8 @@ def linhas_do_plano(plano):
                                      else "%s / %s → %s" % (l["equacao"], l["condicao"], l["variavel"]))
             aceite = " (indeterminado aceito pelo PO: %s)" % ", ".join(l["aceites_po"]) if l["aceites_po"] else ""
             out.append("  %-8s %s%s" % (l["status"], nome, aceite))
+            out += formas(*((l["nome"],) if tipo == "equacoes" else (l["filha"], l["mae"]) if tipo == "deriva_de"
+                            else (l["equacao"],)))
             out += ["           - %s" % p for p in l["pendencias"]]
     for tipo in ("variaveis", "usa", "definida_por", "conceitos", "heuristicas", "sustenta", "documentos"):
         aprov = sum(1 for l in plano[tipo] if l["status"] == APROVADO)
