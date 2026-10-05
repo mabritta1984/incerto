@@ -12,8 +12,15 @@ perda declarada: não reprova, é relatado por rota.
 
 Imprime o relatório de fidelidade ao PO (resumo, por rota, equações, perdas declaradas, veredito por
 documento). Com `--aprovar`, grava `manifesto.json` em `extraidos/<onda>/` e copia os aptos (`.md`,
-`.report.json`, `.assets/`) e o manifesto para `conferidos/<onda>/`; `--recusar <nome>=<motivo>` deixa
-um apto de fora por decisão do PO. Nunca apaga `extraidos/` e nunca reescreve `conferidos/`.
+`.report.json`, `.assets/`, o sidecar de reparo) e o manifesto para `conferidos/<onda>/`;
+`--recusar <nome>=<motivo>` deixa um apto de fora por decisão do PO. Nunca apaga `extraidos/` e nunca
+reescreve `conferidos/`.
+
+Reparo de páginas (decisão do PO de 05/10): com o sidecar `<nome>.<ext>.reparos.json` do `emendar_paginas.py`,
+o sha256 do `.md` tem de ser o de depois do último reparo (senão, "md alterado fora do reparo"); as páginas
+reparadas saem de `paginas_falhas` e a mensagem resolvida sai das perdas; os itens e as equações do reparo
+entram nas mesmas regras e nas contagens; o relatório ganha a seção "Reparos" e o `--aprovar` copia o sidecar.
+Sem sidecar, nada muda.
 
 Tudo vem dos `.report.json`; o `lote-<data>.md` nunca é lido (o `rerender` do mineiro não o regrava).
 Parseáveis pelo SymPy: medido pela função de parse do `extrair_equacoes.py` (Task 8), por import local,
@@ -41,6 +48,7 @@ RE_LOTE = re.compile(r"^lote-\d{4}-\d{2}-\d{2}\.md$")
 RE_EXTENSAO_DE_ORIGEM = re.compile(r"^.+\.[A-Za-z0-9]{1,8}$")
 RE_NOTA_DE_PAGINA = re.compile(r"\[fallback\] páginas? \d+(-\d+)? não convertida")
 SUF_MD, SUF_REL = ".md", ".report.json"
+SUF_REPAROS = ".reparos.json"         # sidecar do emendar_paginas.py (reparo de páginas, decisão do PO de 05/10)
 MARCA_FALLBACK = "[fallback]"
 MONTAGEM = "/mnt/corpus/"          # onde o job monta o bucket; o `source` dos relatórios começa aqui
 MANIFESTO = "manifesto.json"
@@ -83,7 +91,19 @@ def _ultimo_feedback(item):
     return str((tentativas[-1] or {}).get("feedback") or "") if tentativas else ""
 
 
-def _conferir_relatorio(rel, md, motivos, perdas):
+def _conferir_equacoes(eq, motivos, onde=""):
+    detectadas = eq.get("equacoes_detectadas") or 0
+    validador = eq.get("validador")
+    if detectadas > 0 and validador != "katex":
+        motivos.append("%d equação(ões) detectada(s)%s com summary.equacoes.validador = %s; o contrato exige "
+                       "\"katex\"" % (detectadas, onde, json.dumps(validador)))
+    if (eq.get("latex_invalido_final") or 0) > 0:
+        motivos.append("summary.equacoes.latex_invalido_final = %d%s" % (eq["latex_invalido_final"], onde))
+
+
+def _conferir_relatorio(rel, md, motivos, perdas, reparos=()):
+    """Regras do contrato de consumo. Com `reparos` (o sidecar do `emendar_paginas.py`), os itens e as
+    equações do reparo entram nas mesmas regras e as páginas reparadas saem das `paginas_falhas`."""
     summary, items = rel["summary"], rel["items"]
     if summary.get("itens") != len(items):
         motivos.append("summary.itens = %r, mas o relatório tem %d item(ns)" % (summary.get("itens"), len(items)))
@@ -93,15 +113,14 @@ def _conferir_relatorio(rel, md, motivos, perdas):
         motivos.append("relatório sem summary.equacoes")
         eq = {}
     else:
-        detectadas = eq.get("equacoes_detectadas") or 0
-        validador = eq.get("validador")
-        if detectadas > 0 and validador != "katex":
-            motivos.append("%d equação(ões) detectada(s) com summary.equacoes.validador = %s; o contrato exige "
-                           "\"katex\"" % (detectadas, json.dumps(validador)))
-        if (eq.get("latex_invalido_final") or 0) > 0:
-            motivos.append("summary.equacoes.latex_invalido_final = %d" % eq["latex_invalido_final"])
+        _conferir_equacoes(eq, motivos)
+    for r in reparos:
+        if isinstance(r["equacoes"], dict):
+            _conferir_equacoes(r["equacoes"], motivos, " no reparo das páginas %s" % r["paginas"])
+        else:
+            motivos.append("reparo das páginas %s sem equacoes" % r["paginas"])
 
-    for item in items:
+    for item in itens_do_documento(rel, reparos):
         iid, rota = item.get("item_id"), item.get("route")
         final = item.get("final") or ""
         if item.get("fallback"):
@@ -118,14 +137,39 @@ def _conferir_relatorio(rel, md, motivos, perdas):
     if (parse.get("paginas_sem_texto") or 0) > 0:
         motivos.append("summary.parse.paginas_sem_texto = %d: página sem camada de texto saiu vazia e sem marca "
                        "(reconverter com gemini_pdf)" % parse["paginas_sem_texto"])
-    falhas = parse.get("paginas_falhas") or 0
+    falhas = paginas_falhas(rel, reparos)
+    if falhas < 0:
+        motivos.append("os reparos cobrem %d página(s) a mais que summary.parse.paginas_falhas" % -falhas)
     if falhas > 0:
         if RE_NOTA_DE_PAGINA.search(md):
-            erros = [str(e) for e in summary.get("erros") or [] if "página" in str(e)]
+            resolvidos = {str(e) for r in reparos for e in r["erros_resolvidos"]}
+            erros = [str(e) for e in summary.get("erros") or [] if "página" in str(e) and str(e) not in resolvidos]
             perdas.append({"item": "%d página(s)" % falhas, "rota": "parse", "motivo": "; ".join(erros)})
         else:
             motivos.append("perda silenciosa: summary.parse.paginas_falhas = %d sem a nota [fallback] no .md" % falhas)
     return eq
+
+
+def itens_do_documento(rel, reparos=()):
+    """Os itens do relatório do `mineiro` seguidos dos itens dos reparos (ids já prefixados pelo sidecar)."""
+    return list(rel["items"]) + [i for r in reparos for i in r["items"]]
+
+
+def paginas_falhas(rel, reparos=()):
+    """`summary.parse.paginas_falhas` menos as páginas que os reparos cobrem."""
+    falhas = (rel["summary"].get("parse") or {}).get("paginas_falhas") or 0
+    return falhas - sum(paginas_da_faixa(r) for r in reparos)
+
+
+def _conferir_reparos(sha_md, reparos, motivos):
+    """O `.md` atual tem de ser o de depois do último reparo, e cada reparo parte do de depois do anterior."""
+    for anterior, r in zip(reparos, reparos[1:]):
+        if r["sha256_md_antes"] != anterior["sha256_md_depois"]:
+            motivos.append("md alterado fora do reparo: o reparo das páginas %s não parte do .md de depois do "
+                           "reparo das páginas %s" % (r["paginas"], anterior["paginas"]))
+    if reparos and reparos[-1]["sha256_md_depois"] != sha_md:
+        motivos.append("md alterado fora do reparo: o sha256 do .md não é o de depois do último reparo "
+                       "(páginas %s)" % reparos[-1]["paginas"])
 
 
 def conferir_documento(pasta, nome):
@@ -134,7 +178,8 @@ def conferir_documento(pasta, nome):
     motivos, perdas = [], []
     doc = {"documento": nome, "veredito": "reprovado", "motivos": motivos, "perdas": perdas,
            "sha256_md": None, "sha256_report": None, "original": None, "engine": None,
-           "model_versions": [], "validador": None, "equacoes_detectadas": 0, "_relatorio": None, "_md": None}
+           "model_versions": [], "validador": None, "equacoes_detectadas": 0, "_relatorio": None, "_md": None,
+           "_reparos": [], "reparos": None}
     if not RE_EXTENSAO_DE_ORIGEM.match(nome):
         motivos.append("nome sem a extensão de origem (esperado <nome>.<ext>.md, ex.: Relatorio.pdf.md)")
     c_md, c_rel = os.path.join(pasta, nome + SUF_MD), os.path.join(pasta, nome + SUF_REL)
@@ -160,15 +205,56 @@ def conferir_documento(pasta, nome):
         return doc
     doc["_relatorio"] = rel
     doc["_md"] = md
+    try:
+        reparos = ler_reparos(pasta, nome)
+    except ValueError as e:
+        motivos.append(str(e))           # sidecar ilegível: confere sem ele, e o documento já não é apto
+        reparos = None
+    if reparos:
+        doc["_reparos"] = reparos
+        doc["reparos"] = {"sha256": _sha256(os.path.join(pasta, nome + SUF_REPAROS)),
+                          "paginas": [r["paginas"] for r in reparos]}
+        _conferir_reparos(doc["sha256_md"], reparos, motivos)
     doc["original"] = rel["source"]
     doc["engine"] = (rel["summary"].get("parse") or {}).get("engine")
     doc["model_versions"] = sorted(rel["summary"].get("model_versions") or [], key=_bytes)
-    eq = _conferir_relatorio(rel, md, motivos, perdas)
+    eq = _conferir_relatorio(rel, md, motivos, perdas, doc["_reparos"])
     doc["validador"] = eq.get("validador")
-    doc["equacoes_detectadas"] = eq.get("equacoes_detectadas") or 0
+    doc["equacoes_detectadas"] = (eq.get("equacoes_detectadas") or 0) + sum(
+        (r["equacoes"] or {}).get("equacoes_detectadas") or 0 for r in doc["_reparos"])
     if not motivos:
         doc["veredito"] = "apto"
     return doc
+
+
+CAMPOS_REPARO = ("paginas", "pagina_inicial", "pagina_final", "onda_reparo", "documento_reparo", "sha256_report_reparo",
+                 "sha256_md_reparo", "sha256_md_antes", "sha256_md_depois", "items", "equacoes", "erros_resolvidos")
+
+
+def ler_reparos(pasta, nome):
+    """Os registros do sidecar `<nome>.reparos.json` (gravado só pelo `emendar_paginas.py`), em ordem de
+    aplicação; None sem sidecar. Sidecar ilegível ou fora do formato é ValueError."""
+    caminho = os.path.join(pasta, nome + SUF_REPAROS)
+    if not os.path.isfile(caminho):
+        return None
+    try:
+        with io.open(caminho, encoding="utf-8") as f:
+            reparos = json.load(f)
+        if not isinstance(reparos, list) or not reparos:
+            raise ValueError("esperada uma lista não vazia de registros")
+        for r in reparos:
+            if not isinstance(r, dict) or any(k not in r for k in CAMPOS_REPARO) \
+                    or not isinstance(r["items"], list) or not all(isinstance(i, dict) for i in r["items"]) \
+                    or not isinstance(r["erros_resolvidos"], list) \
+                    or not isinstance(r["pagina_inicial"], int) or not isinstance(r["pagina_final"], int):
+                raise ValueError("registro sem os campos %s" % ", ".join(CAMPOS_REPARO))
+    except ValueError as e:
+        raise ValueError("%s%s ilegível: %s" % (nome, SUF_REPAROS, e))
+    return reparos
+
+
+def paginas_da_faixa(reparo):
+    return reparo["pagina_final"] - reparo["pagina_inicial"] + 1
 
 
 def ler_onda(pasta):
@@ -222,13 +308,13 @@ def resumir(docs):
     r["reprovados"] = r["documentos"] - r["aptos"]
     rotas, eq, modelos, custos = {}, dict.fromkeys(CAMPOS_EQ, 0), set(), []
     eq.update(documentos_com_equacao=0, documentos_katex=0, parseaveis_sympy=parseaveis_sympy(docs))
-    paginas_falhas = 0
+    falhas = 0
     for d in docs:
         rel = d["_relatorio"]
         if rel is None:
             continue
-        s = rel["summary"]
-        for item in rel["items"]:
+        s, reparos = rel["summary"], d.get("_reparos") or []
+        for item in itens_do_documento(rel, reparos):
             rota = rotas.setdefault(str(item.get("route")), {"itens": 0, "fallbacks": 0, "nao_aprovados": 0})
             rota["itens"] += 1
             rota["fallbacks"] += 1 if item.get("fallback") else 0
@@ -244,20 +330,23 @@ def resumir(docs):
         r["segundos"] += s.get("segundos") or 0.0
         r["segundos_parede"] += s.get("segundos_parede") or 0.0
         modelos.update(s.get("model_versions") or [])
-        e = s.get("equacoes") if isinstance(s.get("equacoes"), dict) else {}
-        for k in CAMPOS_EQ:
-            eq[k] += e.get(k) or 0
-        if (e.get("equacoes_detectadas") or 0) > 0:
+        partes = [s.get("equacoes")] + [r["equacoes"] for r in reparos]
+        partes = [e for e in partes if isinstance(e, dict)]
+        for e in partes:
+            for k in CAMPOS_EQ:
+                eq[k] += e.get(k) or 0
+        com_equacao = [e for e in partes if (e.get("equacoes_detectadas") or 0) > 0]
+        if com_equacao:
             eq["documentos_com_equacao"] += 1
-            eq["documentos_katex"] += 1 if e.get("validador") == "katex" else 0
+            eq["documentos_katex"] += 1 if all(e.get("validador") == "katex" for e in com_equacao) else 0
         if s.get("custo_estimado_usd") is not None:
             custos.append(s["custo_estimado_usd"])
             r["custo_parcial"] = r["custo_parcial"] or bool(s.get("custo_parcial"))
         else:
             r["custo_parcial"] = True
-        paginas_falhas += (s.get("parse") or {}).get("paginas_falhas") or 0
-    rotas["parse"] = {"itens": None, "fallbacks": paginas_falhas, "nao_aprovados": None}
-    r["fallbacks"] += paginas_falhas
+        falhas += max(0, paginas_falhas(rel, reparos))
+    rotas["parse"] = {"itens": None, "fallbacks": falhas, "nao_aprovados": None}
+    r["fallbacks"] += falhas
     r["por_rota"] = _ordenado(rotas)
     r["equacoes"] = eq
     r["tokens"] = _ordenado(r["tokens"]) if r["tokens"] else {}
@@ -318,11 +407,21 @@ def relatorio_md(onda, docs, r):
               for doc, p in perdas]
     else:
         L.append("Nenhuma.")
+    reparos = [(d["documento"], r) for d in docs for r in d.get("_reparos") or []]
+    if reparos:
+        L += ["", "## Reparos", "",
+              "Páginas reconvertidas numa onda de reparo e emendadas no `.md` pelo `emendar_paginas.py` "
+              "(sidecar `<documento>%s`; o `.report.json` do `mineiro` não muda)." % SUF_REPAROS, "",
+              "| documento | páginas | onda de origem | documento do reparo | sha256 do relatório do reparo | "
+              "sha256 do .md antes | sha256 do .md depois |", "|---|---|---|---|---|---|---|"]
+        L += ["| %s | %s | %s | %s | %s | %s | %s |" % tuple(_cel(x) for x in (
+            doc, r["paginas"], r["onda_reparo"], r["documento_reparo"], r["sha256_report_reparo"],
+            r["sha256_md_antes"], r["sha256_md_depois"])) for doc, r in reparos]
     L += ["", "## Veredito por documento", "",
           "| documento | itens | equações | validador | fallbacks | veredito | motivos |", "|---|---|---|---|---|---|---|"]
     for d in docs:
         rel = d["_relatorio"]
-        itens = len(rel["items"]) if rel else "—"
+        itens = len(itens_do_documento(rel, d.get("_reparos") or [])) if rel else "—"
         L.append("| %s | %s | %d | %s | %d | %s | %s |" % (
             _cel(d["documento"]), itens, d["equacoes_detectadas"], d["validador"] or "—", len(d["perdas"]),
             "✔ apto" if d["veredito"] == "apto" else "✘ " + d["veredito"], _cel("; ".join(d["motivos"]) or "—")))
@@ -346,6 +445,8 @@ def manifesto(raiz, onda, docs, resumo):
     for d in docs:
         x = {k: d[k] for k in campos}
         x["sha256_original"] = _sha256_original(raiz, d["original"])
+        if d.get("reparos"):
+            x["reparos"] = d["reparos"]
         documentos_.append(x)
     return {"onda": onda, "ferramenta": "mineiro", "resumo": resumo, "documentos": documentos_}
 
@@ -357,6 +458,8 @@ def json_manifesto(m):
 def _arquivos_do_documento(pasta, nome):
     """Caminhos relativos (separador `/`) do que o portão copia de um documento."""
     rels = [nome + SUF_MD, nome + SUF_REL]
+    if os.path.isfile(os.path.join(pasta, nome + SUF_REPAROS)):
+        rels.append(nome + SUF_REPAROS)
     assets = os.path.join(pasta, nome + ".assets")
     if os.path.isdir(assets):
         for base, subpastas, arquivos in os.walk(assets):

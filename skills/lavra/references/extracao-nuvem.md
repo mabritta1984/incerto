@@ -152,6 +152,30 @@ Extração é o estágio em que o erro entra em silêncio e com boa aparência; 
    `manifesto.json` é o registro da conferência e é regravado a cada `--aprovar` (o versionamento do
    bucket guarda os anteriores): documento reprovado que volta apto depois do `rerender` entra assim.
 
+### Reparo de páginas (emenda)
+
+O `mineiro` reconverte só documentos inteiros. Quando uma faixa de páginas se perde (nota
+`> ⚠️ [fallback] páginas A-B não convertida(s) …` no `.md`, `summary.parse.paginas_falhas` e a mensagem em
+`summary.erros`), o PO pode converter só aquelas páginas como sub-PDF numa onda própria
+(`extraidos/<onda>-reparo-<sigla>/<nome>_pA-B.pdf`, numerado de 1 a N) e emendá-las antes do portão
+(decisão do PO de 05/10, Dynamic_Hedging.pdf pp. 321–340 da onda 2026-10-TALEB-1):
+`python3 skills/lavra/scripts/emendar_paginas.py --raiz <corpus> --onda <onda> --documento <nome.pdf>
+--onda-reparo <onda> --documento-reparo <nome_pA-B.pdf> --paginas A-B`. A nota vira o `.md` do reparo entre
+`<!-- reparo: páginas A-B, onda <onda-reparo>, relatório sha256 <…> -->` e `<!-- fim do reparo: páginas A-B -->`;
+os assets vão para `<nome>.assets/` com o prefixo `reparo-pA-B-` (referências reescritas; colisão recusa); o
+registro (faixa, onda e documento do reparo, sha256 do relatório e do `.md` do reparo, sha256 do `.md` alvo
+antes e depois, os `items` com ids prefixados, `summary.equacoes` e as mensagens de `erros` resolvidas) vai
+para o sidecar `<nome>.reparos.json`. O `.report.json` do `mineiro` nunca muda (procedência). A emenda recusa,
+sem gravar nada, se não houver exatamente uma nota para a faixa, se o reparo tiver `paginas_falhas` > 0 ou
+outro número de páginas (quando o relatório o informa), se o reparo não passar nas regras deste contrato, ou
+se a faixa já tiver sido reparada (não se reaplica). O portão lê o sidecar: o `.md` tem de ser o de depois do
+último reparo (senão, "md alterado fora do reparo", inapto); as páginas reparadas saem de `paginas_falhas`
+e a mensagem resolvida sai das perdas; itens e equações do reparo entram nas regras de perda silenciosa e
+nas contagens; o relatório ganha a seção "Reparos"; o `--aprovar` copia o sidecar e os assets emendados.
+Os marcadores são comentários HTML: não viram tópico no recorte nem equação na extração, e as equações do
+reparo entram na ordem do `.md` emendado (`<documento>#<ordem>`). Perda de sumário (ex.: SCFT pp. 7–14) não
+se emenda: continua perda declarada.
+
 ## Executar uma onda
 
 A conversão é o Cloud Run Job `mineiro-onda` (projeto `jazida`, `us-central1`), disparado pelo workflow
