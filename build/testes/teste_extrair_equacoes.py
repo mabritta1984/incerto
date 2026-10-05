@@ -107,6 +107,24 @@ class TesteParse(unittest.TestCase):
                       r"y = \Delta_t"):
             self.assertTrue(parsear_latex(latex)["ok"], latex)
 
+    def test_limites_de_operador_nao_sao_subscrito_seguido_de_expoente(self):
+        # o `_{…}^{…}` de \sum, \prod, \int é limite do operador, não símbolo com subscrito: o srepr é o de 6c8b2fa
+        casos = {r"S = \sum_{i=1}^{n} x_{i}":
+                 "Equality(Symbol('S'), Sum(Symbol('x_i'), Tuple(Symbol('i'), Integer(1), Symbol('n'))))",
+                 r"I = \int_{0}^{1} x \, dx":
+                 "Equality(Symbol('I'), Integral(Symbol('x'), Tuple(Symbol('x'), Integer(0), Integer(1))))",
+                 r"P = \prod_{i=1}^{n} x_{i}":
+                 "Equality(Symbol('P'), Product(Symbol('x_i'), Tuple(Symbol('i'), Integer(1), Symbol('n'))))",
+                 r"\lim_{n \to \infty} a_n = 0":
+                 "Equality(Limit(Symbol('a_n'), Symbol('n'), oo, Symbol('-')), Integer(0))"}
+        for latex, srepr in casos.items():
+            r = parsear_latex(latex)
+            self.assertTrue(r["ok"], (latex, r["motivo"])); self.assertEqual(r["srepr"], srepr, latex)
+        # o símbolo com subscrito segue perda, mesmo ao lado de um operador
+        for latex in (r"S = \sum_{i=1}^{n} C_n^k", r"y = x_{i}^{2} + \int_{0}^{1} x \, dx"):
+            self.assertEqual(parsear_latex(latex)["motivo"], "nao_suportado:_{…}^", latex)
+        self.assertEqual(parsear_latex(r"S = \sum\limits_{i=1}^{n} x_i")["motivo"], "strict")   # como em 6c8b2fa
+
     def test_decoracoes_sao_perda(self):
         # `\overline{x}` → conjugate(x) em strict; as outras viram operação ou símbolo falso
         for cmd in ("overline", "underline", "widehat", "widetilde", "hat", "bar", "tilde", "check", "breve",

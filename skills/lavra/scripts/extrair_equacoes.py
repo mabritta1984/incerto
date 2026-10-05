@@ -17,7 +17,8 @@ documentos e são pulados.
      função `Var`. Sequência de letras sem marcação (`TC`) NÃO é normalizada: não há como saber se é `T·C`;
      também são perda, por ambíguas: expoente seguido de `_` ou `(` (`x^{2}_{i}`, `f^{-1}(x)`), letra
      seguida de `[` e decorações (`\\overline`, `\\hat`, …); e, porque o SymPy os lê errado com `ok`,
-     símbolo com subscrito seguido de `^` (`C_n^k` → Pow(C_n, k): `_{…}^`), chaves de conjunto `\\{…\\}` (e
+     símbolo com subscrito seguido de `^` (`C_n^k` → Pow(C_n, k): `_{…}^`; não os limites de `\\sum`,
+     `\\prod`, `\\int`, `\\lim`, …), chaves de conjunto `\\{…\\}` (e
      `\\left\\{…\\right\\}`, lidas como `x`), `^{(…)}` (lido como potência) e `\\Delta` seguido de letra
      (`\\Delta x` lido como `Delta·x`);
   3. `sympy.parsing.latex.parse_latex(..., strict=True)`; erro é perda `strict`;
@@ -74,8 +75,16 @@ NAO_SUPORTADOS = (
     r"\^\s*\{\s*\(",
     r"\\Delta(?=\s*(?:[A-Za-z]|\\(?:%s)(?![A-Za-z])))" % "|".join(GREGAS),
 )
-# símbolo com subscrito seguido de `^` (`C_n^k`, binomial; `x_{i}^{2}`): o SymPy lê Pow(C_n, k) — perda
+# símbolo com subscrito seguido de `^` (`C_n^k`, binomial; `x_{i}^{2}`): o SymPy lê Pow(C_n, k) — perda;
+# o `_{…}^{…}` logo depois de um operador (`\sum_{i=1}^{n}`, `\int_{0}^{1}`) é limite dele, não subscrito
 _SUBSCRITO_E_EXPOENTE = r"_\s*(?:\{[^{}]*\}|\\[A-Za-z]+|[A-Za-z0-9])\s*\^"
+_OPERADOR_ANTES = re.compile(r"\\(?:sum|prod|int|oint|lim|max|min|sup|inf|bigcup|bigcap)"
+                             r"(?:\s*\\(?:no)?limits)?\s*$")
+
+
+def _subscrito_e_expoente(latex):
+    """Há símbolo com subscrito seguido de `^` (e não limite de operador)?"""
+    return any(not _OPERADOR_ANTES.search(latex[:m.start()]) for m in re.finditer(_SUBSCRITO_E_EXPOENTE, latex))
 # Marcação que sobrou depois da normalização: o parser a leria como símbolo (`Symbol('mathrm')`).
 RESIDUAIS = r"\\(?:mathbb|mathrm|mathit|mathbf|mathcal|mathsf|boldsymbol|operatorname|text|textrm|mbox)(?![A-Za-z])"
 COMANDOS_COMO_SIMBOLO = frozenset(("mathbb", "mathrm", "mathit", "mathbf", "mathcal", "operatorname", "text",
@@ -182,7 +191,7 @@ def _preparar(latex):
     if seguinte:
         # `x^{2}_{i}`: o SymPy descarta o subscrito; `f^{-1}(x)`: inversa lida como produto
         return None, [], "nao_suportado:^{…}%s" % seguinte
-    if re.search(_SUBSCRITO_E_EXPOENTE, latex):
+    if _subscrito_e_expoente(latex):
         return None, [], "nao_suportado:_{…}^"
     m = re.search(RESIDUAIS, _RE_MARCA.sub(" ", t))
     if m:
