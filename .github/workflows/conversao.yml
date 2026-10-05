@@ -1,0 +1,62 @@
+# copiado de mabritta1984/Lastro@1676115 .github/workflows/conversao.yml
+# Conversão de uma onda pelo mineiro. Só manual: rodar uma onda gasta modelo, e disparar é decisão do PO.
+# Autentica no Google Cloud por Workload Identity Federation (conta gh-jazida, run.jobsExecutorWithOverrides
+# só no job mineiro-onda), sem chave, e executa o Cloud Run Job, que lê originais/<origem>/ e grava
+# extraidos/<onda>/ no bucket montado em /mnt/corpus. O que sai de lá passa pelo portão do PO
+# (skills/lavra/scripts/conferir_onda.py) antes de ir para conferidos/.
+# Contrato: skills/lavra/references/extracao-nuvem.md.
+# Pré-requisito: as variáveis de repositório GCP_WORKLOAD_IDENTITY_PROVIDER e GCP_SERVICE_ACCOUNT
+# (Settings > Secrets and variables > Actions > Variables) precisam ser criadas pelo PO neste repositório.
+name: conversao
+
+on:
+  workflow_dispatch:
+    inputs:
+      onda:
+        description: "Nome da onda (pasta nova em extraidos/), ex.: 2026-10-FAO-1"
+        required: true
+        type: string
+      origem:
+        description: "Pasta em originais/ com os documentos da onda"
+        required: false
+        default: TALEB
+        type: string
+
+permissions:
+  contents: read
+  id-token: write   # token OIDC trocado pelo WIF; nenhuma chave de conta de serviço
+
+concurrency:
+  group: conversao-${{ inputs.onda }}
+  cancel-in-progress: false
+
+jobs:
+  converter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360   # onda 2026-09-PSX-1 do Jazida (43 artigos): 2,6 h de parede
+    env:
+      ONDA: ${{ inputs.onda }}
+      ORIGEM: ${{ inputs.origem }}
+    steps:
+      - name: Valida os nomes da onda e da origem (sem /, .. nem vírgula, que separa os --args)
+        run: |
+          padrao='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+          for nome in "$ONDA" "$ORIGEM"; do
+            if [[ ! "$nome" =~ $padrao || "$nome" == *..* ]]; then
+              echo "::error::nome inválido: '$nome' (use letras, dígitos, '.', '_' e '-'; sem '/', '..' nem vírgula)"
+              exit 1
+            fi
+          done
+          echo "onda=$ONDA origem=$ORIGEM"
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Executa o job mineiro-onda e espera o fim
+        run: |
+          gcloud run jobs execute mineiro-onda --project jazida --region us-central1 --wait \
+            --args "run,/mnt/corpus/originais/${ORIGEM},--out,/mnt/corpus/extraidos/${ONDA},--config,/app/config-cloud.yaml"

@@ -1,0 +1,8 @@
+# Dependências do Incerto fora da biblioteca padrão — pino exato (decisão A6). Cada uma é importada DENTRO
+# de função e só nos arquivos que o verificar_incerto.py lista (skills/lavra/scripts/extrair_equacoes.py e
+# skills/lavra/scripts/fiscal.py). Análises usam só statistics, math e random.
+# sympy: parse e álgebra do fiscal; mpmath: transitiva do sympy; antlr4: só o sympy.parsing.latex (o SymPy
+# exige a série 4.11).
+sympy==1.14.0
+mpmath==1.3.0
+antlr4-python3-runtime==4.11.1
