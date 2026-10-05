@@ -108,8 +108,9 @@ Registre em `docs/oficina/onda-<onda>.md` o que o PO precisa ver da onda: tempos
 informado"), trechos, equações parseáveis sobre o total e cada perda declarada com o motivo.
 
 **Pare se** o recorte abortar (tópico acima de `--teto-chars`) ou recusar a saída já existente, se a ingestão
-sair com 1 (linha recusada) ou o `--verificar` sair com 1 (duplicata, embedding fora da dimensão), ou se a
-extração recusar sobrescrever `equacoes-<onda>.jsonl` com conteúdo diferente ou um `--nivel` diferente do
+sair com 1 (linha recusada) ou o `--verificar` sair com 1 (duplicata, embedding fora da dimensão, índice
+`trecho_*_incerto` ausente ou com o nome tomado por outro índice do banco compartilhado), ou se a extração
+recusar sobrescrever `equacoes-<onda>.jsonl` com conteúdo diferente ou um `--nivel` diferente do
 recorte.
 
 ### 5. Aplicar os momentos

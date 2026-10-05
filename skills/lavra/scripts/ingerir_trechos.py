@@ -16,6 +16,10 @@ Uso:
   python3 ingerir_trechos.py --entrada _esteira/incerto/trechos-<onda>.jsonl \
       [--state _esteira/incerto/ingestao-<onda>.json] [--corpus incerto] [--database <db>]
   python3 ingerir_trechos.py --verificar [--corpus incerto] [--database <db>]
+`--verificar` confere contagem por onda, chaves duplicadas, dimensão dos embeddings e, por `SHOW INDEXES`, que
+`trecho_embedding_incerto` (VECTOR, `nucleo.GEMINI_DIM` dimensões quando expostas) e `trecho_texto_incerto`
+(FULLTEXT) existem com esses nomes sobre `:Trecho` — no Aura compartilhado, `IF NOT EXISTS` não cria nada se o
+nome já é de outro índice; ausente, a falha nomeia o equivalente sobre `:Trecho` que exista com outro nome.
 """
 import argparse
 import io
@@ -51,6 +55,11 @@ CYPHER_POR_ONDA = "MATCH (t:Trecho {corpus: $corpus}) RETURN t.onda, count(t) OR
 CYPHER_DUPLICADAS = ("MATCH (t:Trecho {corpus: $corpus}) "
                      "WITH t.documento AS d, t.topico AS tp, t.parte AS p, count(*) AS n WHERE n > 1 "
                      "RETURN d, tp, p, n ORDER BY d, tp, p")
+# o Aura é compartilhado: `CREATE … IF NOT EXISTS` não cria nada se o nome já existe (talvez de outro rótulo)
+CYPHER_INDICES = ("SHOW INDEXES YIELD name, type, labelsOrTypes, properties, options "
+                  "RETURN name, type, labelsOrTypes, properties, options ORDER BY name")
+# nome → (tipo, propriedade de :Trecho) que o índice tem de ter
+INDICES = {INDICE_VETORIAL: ("VECTOR", "embedding_gemini"), INDICE_TEXTO: ("FULLTEXT", "texto")}
 CYPHER_DIMENSAO = ("MATCH (t:Trecho {corpus: $corpus}) "
                    "WHERE t.embedding_gemini IS NULL OR size(t.embedding_gemini) <> $dim "
                    "RETURN t.documento, t.topico, t.parte, size(t.embedding_gemini) "
@@ -172,15 +181,54 @@ def avaliar_verificacao(por_onda, duplicadas, dimensao_errada):
     return out, ok
 
 
+def _dimensao(opcoes):
+    """`vector.dimensions` das `options` de `SHOW INDEXES`, ou None se o servidor não a expõe."""
+    config = (opcoes or {}).get("indexConfig") if isinstance(opcoes, dict) else None
+    return config.get("vector.dimensions") if isinstance(config, dict) else None
+
+
+def avaliar_indices(linhas_indices):
+    """Pura: (linhas de relato, ok) a partir das linhas de `CYPHER_INDICES` (name, type, labelsOrTypes,
+    properties, options). Cada índice de `INDICES` tem de existir com esse nome, sobre `:Trecho`, com o tipo e
+    a propriedade dele (e o vetorial com `nucleo.GEMINI_DIM` dimensões, quando o servidor as expõe). Ausente →
+    falha que nomeia o índice equivalente sobre `:Trecho` que exista com outro nome."""
+    por_nome = {r[0]: r for r in linhas_indices}
+    out, ok = [], True
+    for nome, (tipo, prop) in sorted(INDICES.items()):
+        equivalentes = sorted(r[0] for r in linhas_indices if r[0] != nome and r[1] == tipo
+                              and "Trecho" in (r[2] or []) and prop in (r[3] or []))
+        r = por_nome.get(nome)
+        if r is None:
+            ok = False
+            out.append("✘ índice %s ausente%s" % (nome, " — há equivalente sobre :Trecho(%s) com outro nome: %s"
+                                                  % (prop, ", ".join(equivalentes)) if equivalentes else ""))
+            continue
+        if r[1] != tipo or list(r[2] or []) != ["Trecho"] or list(r[3] or []) != [prop]:
+            ok = False
+            out.append("✘ índice %s existe com outra definição (%s em %s(%s); esperado %s em Trecho(%s)) — nome "
+                       "tomado por outro índice no banco compartilhado%s"
+                       % (nome, r[1], ",".join(r[2] or []), ",".join(r[3] or []), tipo, prop,
+                          "; equivalente com outro nome: %s" % ", ".join(equivalentes) if equivalentes else ""))
+            continue
+        dim = _dimensao(r[4]) if len(r) > 4 else None
+        if tipo == "VECTOR" and dim is not None and dim != nucleo.GEMINI_DIM:
+            ok = False
+            out.append("✘ índice %s com %s dimensões; esperado %d" % (nome, dim, nucleo.GEMINI_DIM))
+            continue
+        out.append("✔ índice %s: %s em Trecho(%s)%s" % (nome, tipo, prop, ", %s dimensões" % dim if dim else ""))
+    return out, ok
+
+
 def verificar(cred, db, corpus, saida=print):
     p = {"corpus": corpus}
     linhas, ok = avaliar_verificacao(
         nucleo.query_api(cred, db, CYPHER_POR_ONDA, p),
         nucleo.query_api(cred, db, CYPHER_DUPLICADAS, p),
         nucleo.query_api(cred, db, CYPHER_DIMENSAO, dict(p, dim=nucleo.GEMINI_DIM)))
-    for l in linhas:
+    linhas_ind, ok_ind = avaliar_indices(nucleo.query_api(cred, db, CYPHER_INDICES))
+    for l in linhas + linhas_ind:
         saida(l)
-    return ok
+    return ok and ok_ind
 
 
 def main(argv=None):

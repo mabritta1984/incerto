@@ -184,12 +184,71 @@ class TesteVerificar(unittest.TestCase):
 
     def test_exit_1_quando_falha(self):
         respostas = {ING.CYPHER_POR_ONDA: [["o", 1]], ING.CYPHER_DUPLICADAS: [],
-                     ING.CYPHER_DIMENSAO: [["D", "T", 1, 10]]}
+                     ING.CYPHER_DIMENSAO: [["D", "T", 1, 10]], ING.CYPHER_INDICES: indices_certos()}
         with mock.patch.object(NUC, "abrir_banco", return_value=({}, "db", None)), \
                 mock.patch.object(NUC, "query_api", lambda c, d, s, p=None: respostas[s]), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(ING.main(["--verificar", "--corpus", PARTICAO]), 1)
         self.assertIn("✘", out.getvalue())
+
+
+def indice(nome, tipo, rotulos=("Trecho",), props=("texto",), dim=None):
+    """Uma linha de `SHOW INDEXES` como `CYPHER_INDICES` a devolve: name, type, labelsOrTypes, properties, options."""
+    opcoes = {"indexProvider": "x", "indexConfig": {} if dim is None else {"vector.dimensions": dim}}
+    return [nome, tipo, list(rotulos), list(props), opcoes]
+
+
+def indices_certos():
+    return [indice(ING.INDICE_VETORIAL, "VECTOR", props=("embedding_gemini",), dim=NUC.GEMINI_DIM),
+            indice(ING.INDICE_TEXTO, "FULLTEXT")]
+
+
+class TesteIndices(unittest.TestCase):
+    """I6: no Aura compartilhado, `CREATE … IF NOT EXISTS` não cria nada se o nome já existe (de outro
+    rótulo) e não acusa nada se o índice certo existe com outro nome: o `--verificar` confere os dois."""
+
+    def test_os_dois_indices_certos_passam(self):
+        linhas, ok = ING.avaliar_indices(indices_certos() + [indice("outro", "RANGE", ("Lastro",), ("nome",))])
+        self.assertTrue(ok, linhas)
+        self.assertTrue(any(l.startswith("✔") and ING.INDICE_VETORIAL in l for l in linhas))
+
+    def test_ausente_nomeia_o_equivalente_com_outro_nome(self):
+        rows = [indice("vetor_do_lastro", "VECTOR", props=("embedding_gemini",), dim=NUC.GEMINI_DIM),
+                indice(ING.INDICE_TEXTO, "FULLTEXT")]
+        linhas, ok = ING.avaliar_indices(rows)
+        self.assertFalse(ok)
+        falha = [l for l in linhas if l.startswith("✘")]
+        self.assertEqual(len(falha), 1, linhas)
+        self.assertIn(ING.INDICE_VETORIAL, falha[0]); self.assertIn("vetor_do_lastro", falha[0])
+        linhas, ok = ING.avaliar_indices([indice(ING.INDICE_VETORIAL, "VECTOR", props=("embedding_gemini",),
+                                                 dim=NUC.GEMINI_DIM)])
+        self.assertFalse(ok)
+        self.assertTrue(any(l.startswith("✘") and ING.INDICE_TEXTO in l and "ausente" in l for l in linhas))
+
+    def test_nome_certo_com_outra_definicao_ou_dimensao_falha(self):
+        for rows in ([indice(ING.INDICE_VETORIAL, "VECTOR", ("Chunk",), ("embedding_gemini",), NUC.GEMINI_DIM),
+                      indices_certos()[1]],                                         # o nome é de outro rótulo
+                     [indice(ING.INDICE_VETORIAL, "VECTOR", props=("embedding_gemini",), dim=768),
+                      indices_certos()[1]],                                         # dimensão errada
+                     [indices_certos()[0], indice(ING.INDICE_TEXTO, "RANGE")]):    # tipo errado
+            linhas, ok = ING.avaliar_indices(rows)
+            self.assertFalse(ok, rows)
+        # dimensão não exposta pelo servidor: não se acusa o que não se vê
+        sem_dim = [indice(ING.INDICE_VETORIAL, "VECTOR", props=("embedding_gemini",)), indices_certos()[1]]
+        self.assertTrue(ING.avaliar_indices(sem_dim)[1])
+        sem_opcoes = [indices_certos()[0][:4] + [None], indices_certos()[1]]
+        self.assertTrue(ING.avaliar_indices(sem_opcoes)[1])
+
+    def test_verificar_falha_sem_os_indices(self):
+        respostas = {ING.CYPHER_POR_ONDA: [["o", 1]], ING.CYPHER_DUPLICADAS: [], ING.CYPHER_DIMENSAO: [],
+                     ING.CYPHER_INDICES: [indice("vetor_do_lastro", "VECTOR", props=("embedding_gemini",))]}
+        with mock.patch.object(NUC, "query_api", lambda c, d, s, p=None: respostas[s]):
+            saida = []
+            self.assertFalse(ING.verificar({}, "db", PARTICAO, saida=saida.append))
+        self.assertTrue(any("vetor_do_lastro" in l for l in saida))
+        respostas[ING.CYPHER_INDICES] = indices_certos()
+        with mock.patch.object(NUC, "query_api", lambda c, d, s, p=None: respostas[s]):
+            self.assertTrue(ING.verificar({}, "db", PARTICAO, saida=lambda s: None))
 
 
 @precisa_neo4j
@@ -218,6 +277,8 @@ class TesteBancoReal(Base):
         self.assertTrue(ING.verificar(self.cred, self.db, PARTICAO, saida=lambda s: None))
         nomes = {r[0] for r in NUC.query_api(self.cred, self.db, "SHOW INDEXES YIELD name")}
         self.assertTrue({ING.INDICE_VETORIAL, ING.INDICE_TEXTO} <= nomes)
+        linhas, ok = ING.avaliar_indices(NUC.query_api(self.cred, self.db, ING.CYPHER_INDICES))
+        self.assertTrue(ok, linhas)
 
 
 if __name__ == "__main__":
