@@ -68,4 +68,5 @@ evidência de cauda.
 
 O mesmo vale para uma série do SGS: baixe a URL acima, grave o JSON como
 `dados/sgs-<codigo>-<inicio ISO>-<fim ISO>.json` no formato do cache (lista de `["aaaa-mm-dd", valor]`) e a
-chamada com o mesmo intervalo o usa sem tocar a rede.
+chamada com o mesmo intervalo o usa sem tocar a rede. Período cujo fim é hoje ou depois nunca vai ao cache
+(nem gravado nem lido): o dia corrente ainda não fechou, e a série congelaria incompleta — peça até ontem.

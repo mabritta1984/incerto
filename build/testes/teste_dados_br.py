@@ -117,6 +117,21 @@ class TesteSGS(unittest.TestCase):
         self.assertEqual(len(c.urls), 1)
         self.assertEqual(a, b)
 
+    def test_sgs_periodo_que_chega_a_hoje_nunca_vai_ao_cache(self):
+        # M4: o dia corrente (ou futuro) ainda não fechou; cacheá-lo congelaria uma série incompleta
+        hoje = date(2026, 10, 5)
+        for fim in (hoje, date(2026, 10, 9)):
+            c = Contador()
+            DB.sgs(11, date(2026, 10, 1), fim, cache=self.tmp, abrir=c, hoje=hoje)
+            self.assertEqual(os.listdir(self.tmp), [], fim)
+            gravar(DB._caminho_cache(self.tmp, 11, date(2026, 10, 1), fim), "[]")      # cache antigo, de antes
+            self.assertTrue(DB.sgs(11, date(2026, 10, 1), fim, cache=self.tmp, abrir=c, hoje=hoje))
+            self.assertEqual(len(c.urls), 2, fim)                                    # foi à rede as duas vezes
+            os.remove(DB._caminho_cache(self.tmp, 11, date(2026, 10, 1), fim))
+        c = Contador()
+        DB.sgs(11, date(2026, 10, 1), date(2026, 10, 4), cache=self.tmp, abrir=c, hoje=hoje)   # até ontem: cacheia
+        self.assertEqual(os.listdir(self.tmp), ["sgs-11-2026-10-01-2026-10-04.json"])
+
     def test_sgs_cache_cria_pasta_e_nome_deterministico(self):
         pasta = os.path.join(self.tmp, "novo", "dados")
         DB.sgs(11, date(2026, 9, 1), date(2026, 9, 2), cache=pasta, abrir=abrir_fixture("sgs-11.json"))

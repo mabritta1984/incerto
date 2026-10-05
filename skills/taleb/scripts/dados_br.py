@@ -114,15 +114,18 @@ def _ler_cache(caminho):
         return None  # ausente ou corrompido: baixa de novo
 
 
-def sgs(codigo, inicio, fim, cache="dados", abrir=urllib.request.urlopen):
+def sgs(codigo, inicio, fim, cache="dados", abrir=urllib.request.urlopen, hoje=None):
     """Série do SGS entre `inicio` e `fim` (inclusive) como [(data, valor)] em ordem de data.
 
     Cache em `<cache>/sgs-<codigo>-<inicio ISO>-<fim ISO>.json`; pedidos além de 10 anos são divididos em
-    janelas e remontados. HTTP diferente de 200 ou corpo que não é lista levanta `DadosIndisponiveis`."""
+    janelas e remontados. Período que chega a `hoje` (padrão: `date.today()`) ou além nunca vai ao cache —
+    nem é gravado nem é lido: o dia corrente ainda não fechou e a série congelaria incompleta. HTTP diferente
+    de 200 ou corpo que não é lista levanta `DadosIndisponiveis`."""
     if inicio > fim:
         raise ValueError(f"inicio {inicio} depois de fim {fim}")
     caminho = _caminho_cache(cache, codigo, inicio, fim)
-    em_cache = _ler_cache(caminho)
+    cacheavel = fim < (hoje or date.today())
+    em_cache = _ler_cache(caminho) if cacheavel else None
     if em_cache is not None:
         return em_cache
     por_data = {}
@@ -130,9 +133,10 @@ def sgs(codigo, inicio, fim, cache="dados", abrir=urllib.request.urlopen):
         for d, v in _baixar_janela(codigo, a, b, abrir):
             por_data[d] = v
     serie = sorted(por_data.items())
-    os.makedirs(cache, exist_ok=True)
-    with open(caminho, "w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps([[d.isoformat(), v] for d, v in serie], sort_keys=True, ensure_ascii=False))
+    if cacheavel:
+        os.makedirs(cache, exist_ok=True)
+        with open(caminho, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps([[d.isoformat(), v] for d, v in serie], sort_keys=True, ensure_ascii=False))
     return serie
 
 
