@@ -20,6 +20,8 @@ e caudas gordas. O veredito do especialista nunca é recomendação de ativo.
 | `skills/lavra/references/extracao-nuvem.md` | contrato de extração na nuvem (layout do bucket, portão do PO), dono único |
 | `skills/lavra/references/fiscal.md` | protocolo da prova Wolfram do fiscal de duas vias (código, veredito, registro verbatim), dono único |
 | `skills/lavra/scripts/conferir_onda.py` | portão do PO: relatório de fidelidade e aprovação de uma onda do `mineiro` |
+| `skills/taleb/scripts/dados_br.py` | dados BR reproduzíveis: SGS do BCB e COTAHIST da B3, com cache em `dados/` e testes offline |
+| `skills/taleb/references/dados-br.md` | séries do SGS, layout do COTAHIST, hosts a liberar na rede e download manual do ZIP, dono único |
 | `build/testes/` | testes; `_carga.py` carrega módulos por caminho relativo à raiz |
 | `dados/` | cache dos dados BR (conteúdo fora do git) |
 | `docs/superpowers/` | spec e plano |
