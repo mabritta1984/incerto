@@ -15,8 +15,9 @@ usam-nos como vêm; a seção de ergodicidade os converte em retornos simples (e
 diferença entre ln(1+taxa) e a taxa é desprezível em taxas diárias e é ignorada de propósito).
 
 Veredito (determinístico): Extremistão se κ(n0=1, n=30) > 0,3 ou α̂ de Hill (cauda esquerda, k = max(10,
-n//20)) < 2; senão Mediocristão. Classe de fragilidade = `classificar(assimetria_empirica(retornos))` (tolerância
-padrão 1e-9, logo o "robusto" só aparece com assimetria nula). O veredito diagnostica exposição e NUNCA recomenda
+n//20)) < 2; senão Mediocristão. Classe de fragilidade = intervalo bootstrap de 95% de
+`assimetria_empirica` (500 reamostras, semente fixa): antifrágil se todo acima de 0, frágil se todo abaixo, robusto
+se contém 0. Todo número impresso termina com marcação de fonte; linhas derivadas levam a mais fraca das entradas. O veredito diagnostica exposição e NUNCA recomenda
 ativo: usa só frágil/robusto/antifrágil/Extremistão/Mediocristão e termina com a linha fixa FECHAMENTO.
 
 Menos de 60 retornos: ValueError com a contagem (métricas de cauda não significam nada em amostra assim).
@@ -28,6 +29,7 @@ cache, baixa pelo SGS). Código 0 em sucesso, 2 em dado indisponível, amostra p
 """
 import argparse
 import math
+import random
 import sys
 import urllib.request
 from datetime import date
@@ -47,7 +49,34 @@ MINIMO_RETORNOS = 60
 LIMIAR_KAPPA = 0.3
 LIMIAR_ALFA = 2.0
 FECHAMENTO = "Isto não é recomendação de ativo."
-_NOME_CLASSE = {"fragil": "frágil", "robusto": "robusto", "antifragil": "antifrágil"}
+REAMOSTRAS_H = 500
+SEMENTE_H = 15
+AVISO_PRECOS = ("Preços do COTAHIST não são ajustados por proventos ou desdobramentos; um desdobramento "
+                "aparece como retorno espúrio.")
+_ORDEM_TAG = ("[externo]", "[staging]", "[corpus]")  # do mais fraco ao mais forte
+
+
+def _mais_fraca(*tags):
+    return min(tags, key=_ORDEM_TAG.index)
+
+
+def intervalo_h(xs, reamostras=REAMOSTRAS_H, semente=SEMENTE_H):
+    """Intervalo de 95% (percentis 2,5 e 97,5) de H = assimetria_empirica por bootstrap: `reamostras`
+    reamostragens de `xs` com reposição, `random.Random(semente)`."""
+    r = random.Random(semente)
+    n = len(xs)
+    hs = sorted(convexidade.assimetria_empirica([xs[r.randrange(n)] for _ in range(n)])
+                for _ in range(reamostras))
+    return hs[int(0.025 * reamostras)], hs[int(0.975 * reamostras) - 1]
+
+
+def classe_fragilidade(baixo, alto):
+    """antifrágil se o intervalo está todo acima de 0; frágil se todo abaixo; senão robusto."""
+    if baixo > 0:
+        return "antifrágil"
+    if alto < 0:
+        return "frágil"
+    return "robusto"
 
 
 def etiqueta(nome, status_equacoes):
@@ -61,7 +90,8 @@ def _f(x):
 
 
 def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
-                    fonte_taxa_livre="informada pelo chamador"):
+                    fonte_taxa_livre="informada pelo chamador",
+                    fonte_retornos="dados B3/COTAHIST"):
     """Relatório Markdown do ativo `ticker`; ver o cabeçalho do módulo para entrada, veredito e marcação."""
     n = len(retornos)
     if n < MINIMO_RETORNOS:
@@ -78,7 +108,10 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
     r2 = caudas.razao_max_soma(xs, 2)[-1]
     r4 = caudas.razao_max_soma(xs, 4)[-1]
     h = convexidade.assimetria_empirica(xs)
-    classe = _NOME_CLASSE[convexidade.classificar(h)]
+    h_baixo, h_alto = intervalo_h(xs)
+    classe = classe_fragilidade(h_baixo, h_alto)
+    ic = f"IC95% bootstrap [{_f(h_baixo)}; {_f(h_alto)}]"
+    tag_dom = _mais_fraca(tag(EQ_KAPPA), tag(EQ_HILL))
     simples = [math.exp(x) - 1.0 for x in xs]
     temporal = convexidade.crescimento_temporal(simples)
     ensemble = convexidade.crescimento_ensemble(simples)
@@ -86,8 +119,9 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
     dominio = "Extremistão" if extremistao else "Mediocristão"
 
     L = [f"# Relatório de {ticker}", "",
-         f"Amostra: {n} retornos logarítmicos diários, de {retornos[0][0].isoformat()} a "
-         f"{retornos[-1][0].isoformat()}.",
+         f"- Amostra: {n} retornos logarítmicos diários, de {retornos[0][0].isoformat()} a "
+         f"{retornos[-1][0].isoformat()} — fonte: {fonte_retornos} [externo]",
+         "", AVISO_PRECOS,
          "Fonte de cada número: nome da equação e marcação corpus, staging ou externo (externo = a equação "
          "não consta como aprovada ou em staging no grafo).", "",
          "## Caudas", "",
@@ -96,22 +130,26 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
          f"- razão máximo/soma R_n(p=2) = {_f(r2)} — equação `{EQ_MAX_SOMA}` {tag(EQ_MAX_SOMA)}",
          f"- razão máximo/soma R_n(p=4) = {_f(r4)} — equação `{EQ_MAX_SOMA}` {tag(EQ_MAX_SOMA)}", "",
          "## Convexidade", "",
-         f"- assimetria empírica H (choque de ±2σ, por quantis) = {_f(h)} — equação `{EQ_ASSIMETRIA}` "
-         f"{tag(EQ_ASSIMETRIA)}",
-         f"- classe: **{classe}** (sinal de H: H > 0 antifrágil, H < 0 frágil)", "",
+         f"- assimetria empírica H (choque de ±2σ, por quantis) = {_f(h)}, {ic} — equação "
+         f"`{EQ_ASSIMETRIA}` {tag(EQ_ASSIMETRIA)}",
+         f"- classe: **{classe}** — antifrágil se o intervalo de H fica todo acima de 0, frágil se todo "
+         f"abaixo, robusto se contém 0 (ruído amostral não decide a classe) — equação `{EQ_ASSIMETRIA}` "
+         f"{tag(EQ_ASSIMETRIA)}", "",
          "## Ergodicidade", "",
          f"- crescimento temporal (média de ln(1+r)) = {_f(temporal)} — equação `{EQ_CRESC_TEMPORAL}` "
          f"{tag(EQ_CRESC_TEMPORAL)}",
          f"- crescimento de ensemble (média aritmética de r) = {_f(ensemble)} — equação "
          f"`{EQ_CRESC_ENSEMBLE}` {tag(EQ_CRESC_ENSEMBLE)}",
-         f"- taxa livre de risco diária = {_f(taxa_livre_diaria)} — fonte: {fonte_taxa_livre}",
+         f"- taxa livre de risco diária = {_f(taxa_livre_diaria)} — fonte: {fonte_taxa_livre} [externo]",
          f"- excesso de crescimento temporal sobre a taxa livre = {_f(temporal - taxa_livre_diaria)} — "
          f"equação `{EQ_CRESC_TEMPORAL}` {tag(EQ_CRESC_TEMPORAL)}", "",
          "## Veredito", "",
-         f"- domínio: **{dominio}** (Extremistão se κ > {LIMIAR_KAPPA} ou α̂ < {LIMIAR_ALFA:g})",
+         f"- domínio: **{dominio}** — derivado de κ e α̂ (equações `{EQ_KAPPA}` e `{EQ_HILL}`) {tag_dom}",
+         f"- limiares: Extremistão se κ > {LIMIAR_KAPPA} ou α̂ < {LIMIAR_ALFA:g} — limiar do incerto [externo]",
          f"- κ = {_f(kap)} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
          f"- α̂ = {_f(alfa)} — equação `{EQ_HILL}` {tag(EQ_HILL)}",
-         f"- fragilidade: **{classe}** — H = {_f(h)} — equação `{EQ_ASSIMETRIA}` {tag(EQ_ASSIMETRIA)}",
+         f"- fragilidade: **{classe}** — H = {_f(h)}, {ic} — equação `{EQ_ASSIMETRIA}` "
+         f"{tag(EQ_ASSIMETRIA)}",
          "", FECHAMENTO]
     return "\n".join(L) + "\n"
 

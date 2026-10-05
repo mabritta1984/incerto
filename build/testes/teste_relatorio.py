@@ -61,12 +61,14 @@ class TesteRelatorio(unittest.TestCase):
     def test_aprovado_vira_corpus_e_so_a_equacao_certa(self):
         t = self.rel({R.EQ_KAPPA: "aprovado", R.EQ_HILL: "staging"})
         linhas = t.split("\n")
-        kappa = [l for l in linhas if "`kappa`" in l and "κ" in l and "Veredito" not in l]
+        kappa = [l for l in linhas if "`kappa`" in l and "κ" in l and "domínio" not in l]
         self.assertTrue(kappa and all("[corpus]" in l for l in kappa))
         hill = [l for l in linhas if f"`{R.EQ_HILL}`" in l]
         self.assertTrue(hill and all("[staging]" in l and "[corpus]" not in l for l in hill))
         temporal = [l for l in linhas if f"`{R.EQ_CRESC_TEMPORAL}`" in l]
         self.assertTrue(temporal and all("[externo]" in l for l in temporal))
+        dominio = [l for l in linhas if l.startswith("- domínio")]
+        self.assertTrue(dominio and dominio[0].endswith("[staging]"))  # mais fraca entre corpus e staging
 
     def test_status_desconhecido_e_externo(self):
         t = self.rel({R.EQ_KAPPA: "rejeitado"})
@@ -75,9 +77,9 @@ class TesteRelatorio(unittest.TestCase):
     def test_todo_numero_traz_equacao_e_marca(self):
         t = self.rel({R.EQ_KAPPA: "aprovado"})
         for l in t.split("\n"):
-            if l.startswith("- ") and re.search(r"= -?\d", l) and "fonte:" not in l:
-                self.assertRegex(l, r"`\w+`")
+            if l.startswith("- ") and re.search(r"\d|[<>≤≥]", l):
                 self.assertRegex(l, r"\[(corpus|staging|externo)\]$", l)
+                self.assertTrue(re.search(r"`\w+`", l) or "fonte:" in l or "limiar do incerto" in l, l)
 
     def test_veredito_nunca_recomenda(self):
         # Escolha: o fecho fixo "Isto não é recomendação de ativo." contém "recomend". O teste mantém o regex
@@ -112,8 +114,37 @@ class TesteRelatorio(unittest.TestCase):
         C = sys.modules["convexidade"]
         h = C.assimetria_empirica([r for _, r in self.rets])
         t = self.rel()
-        esperado = {"fragil": "frágil", "robusto": "robusto", "antifragil": "antifrágil"}[C.classificar(h)]
-        self.assertIn(f"**{esperado}**", t[t.index("## Veredito"):])
+        baixo, alto = R.intervalo_h([r for _, r in self.rets])
+        self.assertLessEqual(baixo, h)
+        self.assertGreaterEqual(alto, h)
+        esperado = R.classe_fragilidade(baixo, alto)
+        v = t[t.index("## Veredito"):]
+        self.assertIn(f"fragilidade: **{esperado}**", v)
+        self.assertIn(f"[{baixo:.6f}; {alto:.6f}]", v)
+        self.assertIn(f"[{baixo:.6f}; {alto:.6f}]", t[t.index("## Convexidade"):t.index("## Ergodicidade")])
+
+    def classe(self, retornos):
+        t = R.relatorio_ativo("TESTE3", retornos, 0.0, None)
+        return re.search(r"- fragilidade: \*\*(\w+)\*\*", t).group(1)
+
+    def test_gaussiana_simetrica_e_robusta(self):
+        import random
+        r = random.Random(11)
+        g = [(date(2020, 1, 1), r.gauss(0, 0.015)) for _ in range(500)]
+        self.assertEqual(self.classe(g), "robusto")
+
+    def test_amostra_assimetrica_e_antifragil_ou_fragil(self):
+        import random
+        r = random.Random(12)
+        # cauda direita longa e consistente (ganhos grandes frequentes): convexa
+        direita = [(date(2020, 1, 1), r.gauss(0, 0.01) + (0.08 if r.random() < 0.08 else 0.0)) for _ in range(800)]
+        esquerda = [(d, -x) for d, x in direita]
+        self.assertEqual(self.classe(direita), "antifrágil")
+        self.assertEqual(self.classe(esquerda), "frágil")
+
+    def test_aviso_de_precos_nao_ajustados(self):
+        self.assertIn("Preços do COTAHIST não são ajustados por proventos ou desdobramentos; "
+                      "um desdobramento aparece como retorno espúrio.", self.rel())
 
     def test_relatorio_e_deterministico_byte_a_byte(self):
         a, b = self.rel({R.EQ_KAPPA: "aprovado"}), self.rel({R.EQ_KAPPA: "aprovado"})
