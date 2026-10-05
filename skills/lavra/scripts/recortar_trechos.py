@@ -179,7 +179,7 @@ def recortar_texto(texto, nivel, maxlen, alerta_chars, teto_chars, subtitulo_cha
     nunca é atribuído ao tópico de cima. Título de nível < N sem corpo (`# Parte` seguido direto
     de `## Cap.`) não vira tópico vazio: entra como prefixo verbatim do próximo bloco. `pai` de
     um bloco é o título de nível mais alto (número menor) mais próximo acima do seu. Linha dentro de cerca de
-    código (``` ou ~~~) ou de bloco display `$$ … $$` nunca é título.
+    código (``` ou ~~~; só o marcador que abriu a cerca a fecha) ou de bloco display `$$ … $$` nunca é título.
 
     Devolve (chunks, alertas). chunks: dicts com topico, parte, ordem, texto.
     Tópico acima de `alerta_chars` gera aviso (pauta, não corte); acima de
@@ -187,7 +187,8 @@ def recortar_texto(texto, nivel, maxlen, alerta_chars, teto_chars, subtitulo_cha
     blocos, linhas, titulo, pai_do_bloco = [], [], "(abertura)", None
     so_titulos = False      # o bloco corrente até aqui é só título(s) de nível < N e brancos
     acima = {}              # nível -> título vigente, para achar o `pai`
-    cerca, display = False, False   # dentro de ``` / ~~~ ou de `$$ … $$`: nenhuma linha é título
+    cerca, display = None, False    # cerca: o marcador que a abriu (``` ou ~~~); dentro dela ou de `$$ … $$`,
+                                    # nenhuma linha é título
 
     def fechar_bloco():
         corpo = "".join(linhas).strip()
@@ -195,9 +196,10 @@ def recortar_texto(texto, nivel, maxlen, alerta_chars, teto_chars, subtitulo_cha
             blocos.append((titulo, pai_do_bloco, corpo))
 
     for linha in texto.splitlines(keepends=True):
-        protegida = cerca or display
-        if linha.lstrip().startswith(("```", "~~~")) and not display:
-            cerca = not cerca
+        protegida = bool(cerca) or display
+        marcador = next((mk for mk in ("```", "~~~") if linha.lstrip().startswith(mk)), None)
+        if marcador and not display and (cerca is None or marcador == cerca):
+            cerca = marcador if cerca is None else None     # só o mesmo marcador fecha a cerca
         elif not cerca and linha.count("$$") % 2:
             display = not display
         m = None if protegida else re.match(r"^(#{1,6}) (.*)$", linha.rstrip("\n"))

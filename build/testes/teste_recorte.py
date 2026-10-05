@@ -470,6 +470,15 @@ class TesteTituloAcimaDoCorte(unittest.TestCase):
             self.assertIn("# comentario\n## nao", chunks[0]["texto"]); self.assertIn("# x\n## y", chunks[0]["texto"])
             self.assertVerbatim(texto, chunks)
 
+    def test_cerca_so_fecha_com_o_mesmo_marcador(self):
+        # fix 2: dentro de ```, uma linha ~~~ não fecha a cerca (e vice-versa)
+        for abre, outro in (("```", "~~~"), ("~~~", "```")):
+            texto = "## A\n\n%s\n%s\n# dentro\n%s\n\n## B\n\nb\n" % (abre, outro, abre)
+            chunks = self.recortar(texto, 2)
+            self.assertEqual([c["topico"] for c in chunks], ["A", "B"], abre)
+            self.assertIn("# dentro", chunks[0]["texto"])
+            self.assertVerbatim(texto, chunks)
+
     def test_titulo_acima_com_corpo_e_topico_proprio(self):
         texto = "# T\n\nabertura\n\n## A\n\ncurto\n"
         chunks = self.recortar(texto, 2)

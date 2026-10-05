@@ -255,14 +255,20 @@ def chave_wolfram(linha):
 
 RE_OUT = re.compile(r"^Out\[\d+\]=(.*)$", re.M)
 RE_ZERO = re.compile(r"^(?:0|\{\s*0(?:\s*,\s*0)*\s*\})$")
+# zero numérico (`0.`, `0.0`, `0``15.2`, `-0.`, `0.*^-12`): nunca verde (N pode esconder um resíduo pequeno),
+# mas não é diferença fechada não nula — indeterminado aceito
+RE_ZERO_NUMERICO = re.compile(r"^-?0(?:\.0*)?(?:`[0-9.]*`?[0-9.]*)?(?:\*\^-?\d+)?$")
 # cabeças que o Wolfram devolve sem avaliar (ou que não são um número fechado): com uma delas no resultado,
 # a diferença não foi calculada e o indeterminado é legítimo. `Infinity`/`ComplexInfinity` são como
 # `DirectedInfinity` aparece na saída; `Solve`/`Reduce` sem avaliar entram pelo protocolo da derivação.
+# `ConditionalExpression[d, cond]` no topo do resultado (ou de um elemento de lista) é julgado pelo `d`
+# (`_fechada_nao_nula`); aninhado em outra expressão, conta como aberto.
 CABECAS_ABERTAS = ("Integrate", "NIntegrate", "Limit", "Expectation", "NExpectation", "Sum", "Piecewise",
                    "ConditionalExpression", "Indeterminate", "$Failed", "DirectedInfinity", "Undefined",
                    "ComplexInfinity", "Infinity", "Solve", "Reduce")
 RE_ABERTO = re.compile(r"(?<![A-Za-z0-9$])(?:%s)(?![A-Za-z0-9])" % "|".join(re.escape(c) for c in CABECAS_ABERTAS))
-RE_SEM_RESULTADO = re.compile(r"\$Aborted|TimeConstrained|timeout|TimeLimit", re.I)
+# sem resultado: julgado SÓ no resultado depois do último `Out[n]=`, nunca nas mensagens da saída
+RE_SEM_RESULTADO = re.compile(r"^\$Aborted$|\$TimedOut|^Failure\[|^TimeConstrained\[")
 
 
 def resultado_wolfram(saida):
@@ -271,11 +277,9 @@ def resultado_wolfram(saida):
     return achados[-1].strip() if achados else None
 
 
-def _elementos_da_lista(resultado):
-    """Os elementos de nível 1 de `{a, b, …}` (texto), ou None se o resultado não é uma lista."""
-    if not (resultado.startswith("{") and resultado.endswith("}")):
-        return None
-    miolo, partes, nivel, atual = resultado[1:-1], [], 0, ""
+def _argumentos(miolo):
+    """Os argumentos de nível 1 de `miolo` (o texto entre os delimitadores), separados por vírgula."""
+    partes, nivel, atual = [], 0, ""
     for ch in miolo:
         if ch in "{[(":
             nivel += 1
@@ -290,29 +294,59 @@ def _elementos_da_lista(resultado):
     return partes
 
 
-def diferenca_fechada_nao_nula(saida):
-    """A saída é uma diferença que o Wolfram CALCULOU e que não é 0? Não é quando falta `Out[n]=`, quando há
-    `$Aborted`/tempo esgotado, quando o resultado tem cabeça não avaliada (`CABECAS_ABERTAS`), quando é 0 (ou
-    lista só de 0), lista vazia (`Solve` sem solução) ou lista de ramos com algum 0 (a filha escolhe um ramo)."""
+def _elementos_da_lista(resultado):
+    """Os elementos de nível 1 de `{a, b, …}` (texto), ou None se o resultado não é uma lista."""
+    if not (resultado.startswith("{") and resultado.endswith("}")):
+        return None
+    return _argumentos(resultado[1:-1])
+
+
+def _e_zero(texto):
+    return bool(RE_ZERO.match(texto) or RE_ZERO_NUMERICO.match(texto))
+
+
+def _fechada_nao_nula(texto):
+    """`texto` (um resultado ou um elemento dele) é uma expressão fechada e não nula?"""
+    if texto.startswith("ConditionalExpression[") and texto.endswith("]"):
+        args = _argumentos(texto[len("ConditionalExpression["):-1])
+        return bool(args) and _fechada_nao_nula(args[0])        # a condição é da P3 ou do aceite do PO
+    elementos = _elementos_da_lista(texto)
+    if elementos is not None:
+        return any(_fechada_nao_nula(e) for e in elementos)
+    return not (RE_ABERTO.search(texto) or _e_zero(texto))
+
+
+def diferenca_fechada_nao_nula(saida, prova):
+    """A saída é uma diferença que o Wolfram CALCULOU e que não é 0? Não é quando falta `Out[n]=` ou quando o
+    resultado é `$Aborted`, `$TimedOut`, `Failure[…]` ou `TimeConstrained[…]` (mensagens de timeout antes do
+    `Out[n]=` não contam); quando o resultado tem cabeça não avaliada (`CABECAS_ABERTAS`) ou é 0 (exato ou
+    numérico). `ConditionalExpression[d, cond]` vale pelo `d`. Lista: fechada não nula se algum elemento é.
+    Só na derivação (`prova == "P2"`): lista vazia (`Solve` sem solução) e lista de ramos com algum 0 (a filha
+    escolhe um ramo) são indeterminado legítimo; fora dela, `{}` também é resposta não nula."""
     resultado = resultado_wolfram(saida)
-    if resultado is None or RE_SEM_RESULTADO.search(saida) or RE_ABERTO.search(resultado) or RE_ZERO.match(resultado):
+    if resultado is None or RE_SEM_RESULTADO.search(resultado):
         return False
     elementos = _elementos_da_lista(resultado)
-    return not (elementos is not None and (not elementos or "0" in elementos))
+    if prova == "P2" and elementos is not None and (not elementos or any(_e_zero(e) for e in elementos)):
+        return False
+    if elementos == []:
+        return True
+    return _fechada_nao_nula(resultado)
 
 
-def conferir_veredito_wolfram(veredito, saida):
+def conferir_veredito_wolfram(veredito, saida, prova):
     """Regra do veredito de toda prova Wolfram (dono único; vale no registro e na carga das provas).
     `ValueError` se `veredito` é verde e o último `Out[n]=` não é exatamente `0` nem uma lista só de `0`
-    (`{0, 0}`), ou se é indeterminado e a saída é uma diferença fechada não nula (o Wolfram calculou e não
-    deu 0: é vermelho). Vermelho entra como o agente decidiu (`references/fiscal.md`)."""
+    (`{0, 0}`; zero numérico `0.` nunca é verde), ou se é indeterminado e a saída é uma diferença fechada não
+    nula (`diferenca_fechada_nao_nula(saida, prova)`: o Wolfram calculou e não deu 0 — é vermelho). Vermelho
+    entra como o agente decidiu (`references/fiscal.md`)."""
     if veredito == VERDE:
         resultado = resultado_wolfram(saida)
         if resultado is None or not RE_ZERO.match(resultado):
             raise ValueError("veredito verde recusado: o último `Out[n]=` da saída é %s, e verde exige exatamente "
                              "`0` ou uma lista só de `0` (`{0, 0}`) — o veredito é o que a saída diz"
                              % ("ausente" if resultado is None else repr(resultado)))
-    elif veredito == INDETERMINADO and diferenca_fechada_nao_nula(saida):
+    elif veredito == INDETERMINADO and diferenca_fechada_nao_nula(saida, prova):
         raise ValueError("veredito indeterminado recusado: o último `Out[n]=` da saída é %r, uma diferença fechada "
                          "não nula — o Wolfram calculou e não deu 0: o veredito é vermelho" % resultado_wolfram(saida))
 
@@ -339,7 +373,7 @@ def validar_prova_wolfram(linha):
     """Levanta `ValueError` se `linha` não estiver exatamente no formato de `registrar_prova.py` ou se o
     veredito não respeitar a regra (`conferir_veredito_wolfram`) — para P2, momento e equação."""
     _validar_formato_wolfram(linha)
-    conferir_veredito_wolfram(linha["veredito"], linha["saida"])
+    conferir_veredito_wolfram(linha["veredito"], linha["saida"], linha["prova"])
 
 
 def impressao(conteudo):
@@ -410,7 +444,7 @@ def provas_wolfram(caminho):
             except ValueError as e:
                 raise ValueError("%s, linha %d: %s" % (caminho, n, e))
             try:
-                conferir_veredito_wolfram(linha["veredito"], linha["saida"])
+                conferir_veredito_wolfram(linha["veredito"], linha["saida"], linha["prova"])
             except ValueError as e:
                 linha = dict(linha, invalida=str(e))
             chave = chave_wolfram(linha)
@@ -655,8 +689,8 @@ def main(argv=None):
         wolfram = provas_wolfram(args.provas_wolfram or arquivo("provas"))
     except ValueError as e:
         sys.exit("provas Wolfram inválidas — %s" % e)
-    linhas = provas(equacoes, ler_jsonl(arquivo("derivacoes")), ler_jsonl(arquivo("validades")), wolfram)
     derivacoes = ler_jsonl(arquivo("derivacoes"))
+    linhas = provas(equacoes, derivacoes, ler_jsonl(arquivo("validades")), wolfram)
     avisos = provas_orfas(equacoes, derivacoes, wolfram)
     caminho_md = args.relatorio or arquivo("fiscal", "md")
     _gravar(caminho_md, relatorio(args.onda, linhas, avisos))

@@ -523,28 +523,70 @@ class TesteRegraDoVeredito(unittest.TestCase):
         with io.open(self.caminho, "w", encoding="utf-8", newline="\n") as f:
             f.writelines(json.dumps(l, sort_keys=True, ensure_ascii=False) + "\n" for l in linhas)
 
-    def test_regra_do_veredito(self):
-        ok = (("verde", "Out[1]= 0"), ("verde", "aviso\n\nOut[2]= {0, 0}"),
-              ("vermelho", self.SAIDA_PHI), ("vermelho", "Out[1]= 0"),
-              ("indeterminado", "$Aborted"), ("indeterminado", "Out[1]= 0"),
-              ("indeterminado", "Out[1]= {}"), ("indeterminado", "Out[1]= {0, 2*x}"),
-              ("indeterminado", "Out[1]= Integrate[f[x], {x, 0, K}]"), ("indeterminado", "Out[1]= Limit[a/K, K -> Infinity]"),
-              ("indeterminado", "Out[1]= Expectation[x, x \\[Distributed] d]"), ("indeterminado", "Out[1]= Indeterminate"),
-              ("indeterminado", "Out[1]= ConditionalExpression[0, alpha > 1]"), ("indeterminado", "Out[1]= $Failed"),
-              ("indeterminado", "Out[1]= Piecewise[{{1, x > 0}}, 0]"), ("indeterminado", "Out[1]= DirectedInfinity[1]"),
-              ("indeterminado", "Out[1]= Undefined"), ("indeterminado", "Out[1]= NIntegrate[g[x], {x, 0, 1}]"),
-              ("indeterminado", "Out[1]= Sum[1/k, {k, 1, n}]"), ("indeterminado", "Out[1]= NExpectation[x, d]"),
-              ("indeterminado", "TimeConstrained::timeout: tempo\nOut[1]= alpha"),
-              ("indeterminado", "Out[1]= x /. Solve[y == e^x, x]"))
-        for veredito, saida in ok:
-            FI.conferir_veredito_wolfram(veredito, saida)
-        recusados = (("verde", self.SAIDA_PHI), ("verde", "sem Out"), ("verde", "Out[1]= {0, x}"),
-                     ("indeterminado", self.SAIDA_PHI), ("indeterminado", "Out[1]= alpha"),
-                     ("indeterminado", "Out[1]= {2, 3}"), ("indeterminado", "Out[1]= ((-1 + Log[e])*Log[y])/Log[e]"))
-        for veredito, saida in recusados:
-            with self.assertRaises(ValueError, msg=(veredito, saida)) as c:
-                FI.conferir_veredito_wolfram(veredito, saida)
+    TIPOS = ("P2", "momento", "equacao")
+    # saída real do Wolfram (média e variância de Pareto com a variância errada): lista com um elemento fechado
+    # não nulo
+    LISTA_REAL = "Out[1]= {0, -(((-3 + alpha)*alpha*L^2)/((-2 + alpha)*(-1 + alpha)^2))}"
+
+    def aceita(self, veredito, saida, tipos=TIPOS):
+        for prova in tipos:
+            FI.conferir_veredito_wolfram(veredito, saida, prova)
+
+    def recusa(self, veredito, saida, tipos=TIPOS):
+        for prova in tipos:
+            with self.assertRaises(ValueError, msg=(veredito, saida, prova)) as c:
+                FI.conferir_veredito_wolfram(veredito, saida, prova)
             self.assertIn(veredito, str(c.exception))
+
+    def test_regra_do_veredito(self):
+        for veredito, saida in (
+                ("verde", "Out[1]= 0"), ("verde", "aviso\n\nOut[2]= {0, 0}"),
+                ("vermelho", self.SAIDA_PHI), ("vermelho", "Out[1]= 0"),
+                ("indeterminado", "$Aborted"), ("indeterminado", "Out[1]= 0"),
+                ("indeterminado", "Out[1]= Integrate[f[x], {x, 0, K}]"), ("indeterminado", "Out[1]= Limit[a/K, K -> Infinity]"),
+                ("indeterminado", "Out[1]= Expectation[x, x \\[Distributed] d]"), ("indeterminado", "Out[1]= Indeterminate"),
+                ("indeterminado", "Out[1]= ConditionalExpression[0, alpha > 1]"), ("indeterminado", "Out[1]= $Failed"),
+                ("indeterminado", "Out[1]= Piecewise[{{1, x > 0}}, 0]"), ("indeterminado", "Out[1]= DirectedInfinity[1]"),
+                ("indeterminado", "Out[1]= Undefined"), ("indeterminado", "Out[1]= NIntegrate[g[x], {x, 0, 1}]"),
+                ("indeterminado", "Out[1]= Sum[1/k, {k, 1, n}]"), ("indeterminado", "Out[1]= NExpectation[x, d]"),
+                ("indeterminado", "Out[1]= x /. Solve[y == e^x, x]"),
+                ("indeterminado", "Out[1]= {0, Integrate[f[x], x]}")):
+            self.aceita(veredito, saida)
+        for veredito, saida in (
+                ("verde", self.SAIDA_PHI), ("verde", "sem Out"), ("verde", "Out[1]= {0, x}"),
+                ("indeterminado", self.SAIDA_PHI), ("indeterminado", "Out[1]= alpha"),
+                ("indeterminado", "Out[1]= {2, 3}"), ("indeterminado", "Out[1]= ((-1 + Log[e])*Log[y])/Log[e]")):
+            self.recusa(veredito, saida)
+
+    def test_excecoes_de_ramo_so_na_p2(self):
+        # fix 2: `{}` (Solve sem solução) e lista de ramos com algum 0 são indeterminado só na derivação
+        for saida in ("Out[1]= {}", "Out[1]= {0, 2*x}", self.LISTA_REAL):
+            self.aceita("indeterminado", saida, ("P2",))
+            self.recusa("indeterminado", saida, ("momento", "equacao"))
+
+    def test_tempo_e_aborto_se_julgam_pelo_resultado_nao_pelas_mensagens(self):
+        # fix 2: mensagem de timeout com um resultado fechado não nulo depois é vermelho
+        self.recusa("indeterminado", "TimeConstrained::timeout: tempo\nOut[1]= alpha")
+        self.recusa("indeterminado", 'General::timeout: A network operation for "probe" timed out.\n'
+                                     "Out[1]= (2*alpha)/(-1 + alpha)")
+        for saida in ("Out[1]= $Aborted", 'Failure["EvaluationTimeExceeded", <|"Message" -> "tempo"|>]',
+                      "Out[1]= $TimedOut", "Out[1]= TimeConstrained[x^2, 5]",
+                      'Out[1]= Failure["EvaluationTimeExceeded", <||>]'):
+            self.aceita("indeterminado", saida)
+
+    def test_conditional_expression(self):
+        # fix 2 (diretriz): ConditionalExpression[d, cond] com d fechado não nulo é vermelho; com 0 fica aberto
+        self.recusa("indeterminado", "Out[1]= ConditionalExpression[(2*alpha)/(-1 + alpha), alpha > 1]")
+        self.recusa("indeterminado", "Out[1]= ConditionalExpression[{0, 3}, alpha > 1]", ("momento", "equacao"))
+        self.aceita("indeterminado", "Out[1]= ConditionalExpression[0, alpha > 1]")
+        self.aceita("indeterminado", "Out[1]= ConditionalExpression[Integrate[f[x], x], a > 0]")
+        self.aceita("indeterminado", "Out[1]= Piecewise[{{2, x > 0}}, 1]")
+        self.recusa("verde", "Out[1]= ConditionalExpression[0, alpha > 1]")
+
+    def test_zero_numerico_nunca_e_verde_mas_e_indeterminado(self):
+        for saida in ("Out[1]= 0.", "Out[1]= 0.0", "Out[1]= 0``15.2", "Out[1]= {0., 0}", "Out[1]= -0."):
+            self.recusa("verde", saida)
+            self.aceita("indeterminado", saida)
 
     def test_validar_prova_aplica_a_regra_aos_tres_tipos(self):
         for linha in (wolfram_p2("kelly#1", "kelly#2", "verde", SAIDA_ERRADA),

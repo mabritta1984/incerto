@@ -79,13 +79,24 @@ cujo código confere todas de uma vez (ver abaixo).
    verde` se o que vem depois dela for exatamente `0` ou uma lista só de `0` (`{0}`, `{0, 0}`); saída sem
    `Out[n]=`, ou com qualquer outro resultado, recusa o verde sem gravar nada. **O indeterminado também é
    conferido — o Wolfram decide**: se o último `Out[n]=` é uma diferença **fechada e não nula**, o Wolfram
-   calculou e não deu 0, e isso é `vermelho`; `--veredito indeterminado` é recusado. "Fechada" = há
-   `Out[n]=`, a saída não tem `$Aborted` nem tempo esgotado (`TimeConstrained`, `timeout`), e o resultado não
-   tem cabeça não avaliada: `Integrate`, `NIntegrate`, `Limit`, `Expectation`, `NExpectation`, `Sum`,
-   `Piecewise`, `ConditionalExpression`, `Indeterminate`, `$Failed`, `DirectedInfinity` (na saída,
-   `Infinity`/`ComplexInfinity`), `Undefined`, e — pelo protocolo da derivação — `Solve`/`Reduce` devolvidos sem
-   avaliar. Continuam indeterminado legítimo: lista vazia `{}` (`Solve` sem solução) e lista de ramos com algum
-   `0` (a filha escolhe um ramo). `vermelho` é registrado como o agente o decidiu.
+   calculou e não deu 0, e isso é `vermelho`; `--veredito indeterminado` é recusado. Tudo se julga no
+   **resultado** (o que vem depois do último `Out[n]=`), nunca nas mensagens antes dele: um
+   `General::timeout`/`TimeConstrained::timeout` seguido de `Out[1]= (2*alpha)/(-1 + alpha)` é diferença
+   fechada não nula. "Sem resultado" (indeterminado legítimo) só quando não há `Out[n]=` nenhum ou o resultado
+   casa `^$Aborted$`, `$TimedOut`, `^Failure[` ou `^TimeConstrained[`. "Fechada" = o resultado não tem cabeça
+   não avaliada: `Integrate`, `NIntegrate`, `Limit`, `Expectation`, `NExpectation`, `Sum`, `Piecewise`,
+   `Indeterminate`, `$Failed`, `DirectedInfinity` (na saída, `Infinity`/`ComplexInfinity`), `Undefined`, e — pelo
+   protocolo da derivação — `Solve`/`Reduce` devolvidos sem avaliar.
+   - `ConditionalExpression[d, cond]` vale pelo `d`: com `d` fechado não nulo é diferença fechada não nula
+     (vermelho); `ConditionalExpression[0, cond]` fica aberto (indeterminado) — a condição é da P3 ou do aceite
+     do PO. `Piecewise` fica aberto.
+   - Lista: diferença fechada não nula se **algum** elemento é. Só na derivação (P2) há exceções de ramo: lista
+     vazia `{}` (`Solve` sem solução) e lista de ramos com algum `0` (a filha escolhe um ramo) são indeterminado
+     legítimo. Em momento e equação, não: `Out[1]= {0, -(((-3 + alpha)*alpha*L^2)/((-2 + alpha)*(-1 +
+     alpha)^2))}` (saída real, variância errada) é vermelho.
+   - Zero numérico (`0.`, `0.0`, `` 0``15.2 ``) nunca é verde — `N` pode esconder um resíduo pequeno —, mas é
+     indeterminado aceito.
+   `vermelho` é registrado como o agente o decidiu.
 
    **Dono único da regra**: `fiscal.conferir_veredito_wolfram`. O registrador a aplica antes de gravar; o
    fiscal a reaplica ao CARREGAR `provas-<onda>.jsonl` (P2, momento e equação): linha editada à mão que a fere

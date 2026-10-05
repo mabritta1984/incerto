@@ -126,7 +126,7 @@ def main(argv=None):
     linha.update({k: getattr(args, k) for k in proprias})
 
     try:
-        conferir_veredito(args.veredito, linha["saida"])
+        conferir_veredito(args.veredito, linha["saida"], args.prova)
     except ValueError as e:
         sys.exit("não registrado — %s" % e)
 

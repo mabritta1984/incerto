@@ -16,12 +16,16 @@ usam-nos como vêm; a seção de ergodicidade os converte em retornos simples (e
 0,05% ao dia) e entra SÓ na seção Ergodicidade: excesso = crescimento temporal − taxa_livre_diaria (a
 diferença entre ln(1+taxa) e a taxa é desprezível em taxas diárias e é ignorada de propósito).
 
-Veredito (determinístico): Extremistão se κ_1 = κ(n0=1, n=2) > 0,15 ou α̂ de Hill (cauda esquerda, k = max(10,
-n//20)) < 2; senão Mediocristão. κ_1 é o exato da amostra (`caudas.kappa_1_exato`, sem Monte Carlo) e é
-julgado pelo intervalo bootstrap de 95% (`intervalo_kappa_1`, o mesmo percentil do intervalo de H, κ_1 exato
-recalculado em cada reamostra): Extremistão pelo κ se o limite inferior > 0,15; Mediocristão pelo κ se o
-superior ≤ 0,15; senão **fronteira** (κ_1 ∈ [lo; hi] contém 0,15), dita explicitamente — e então o domínio é
-fronteira, salvo α̂ < 2 (Extremistão). O limiar de κ é o do corpus (SCFT 8.3.2: "Any value of κ above .15
+Veredito (determinístico). κ_1 = κ(n0=1, n=2) é o exato da amostra (`caudas.kappa_1_exato`, sem Monte Carlo)
+e é julgado pelo intervalo bootstrap de 95% [lo; hi] (`intervalo_kappa_1`, o mesmo percentil do intervalo de H,
+κ_1 exato recalculado em cada reamostra); α̂ é o de Hill (cauda esquerda, k = max(10, n//20)). O domínio sai
+nesta ordem:
+  1. Extremistão se α̂ < 2 (decide sozinho, qualquer que seja o κ);
+  2. senão, Extremistão se lo > 0,15 (o intervalo inteiro acima do limiar);
+  3. senão, Mediocristão se hi ≤ 0,15 (o intervalo inteiro no limiar ou abaixo);
+  4. senão, **fronteira**: lo ≤ 0,15 < hi, o intervalo contém o limiar — o relatório diz "fronteira (κ_1 ∈
+     [lo; hi] contém 0,15)" e não declara Extremistão nem Mediocristão.
+O limiar de κ é o do corpus (SCFT 8.3.2: "Any value of κ above .15
 effectively indicates a high degree of unreliability of the 'normal approximation'"; a eq. 8.8 usa κ_1 e a
 Table 8.3 o tabula) e sai `[corpus]`; o de α̂ é do incerto e sai `[externo]`. κ(n0=1, n=30) continua no
 relatório como linha informativa. Classe de fragilidade = intervalo bootstrap de 95% de

@@ -250,6 +250,15 @@ class TesteProvaDeEquacao(unittest.TestCase):
         self.assertFalse(os.path.exists(self.arquivo))
         self.assertIs(RP.conferir_veredito, FI.conferir_veredito_wolfram)    # dono único: fiscal.py
 
+    def test_momento_indeterminado_com_lista_de_diferenca_nao_nula_e_recusado(self):
+        # fix 2: a saída real do Wolfram — a exceção de ramo é só da P2
+        saida = "Out[1]= {0, -(((-3 + alpha)*alpha*L^2)/((-2 + alpha)*(-1 + alpha)^2))}\n"
+        with self.assertRaises(SystemExit) as c:
+            self.rodar("--prova", "momento", "--equacao", "pareto#3", "--codigo", self.texto("p.wl", CODIGO_PARETO),
+                       "--saida", self.texto("p.txt", saida), "--veredito", "indeterminado")
+        self.assertIn("indeterminado", str(c.exception.code))
+        self.assertFalse(os.path.exists(self.arquivo))
+
     def test_equacao_desconhecida_e_recusada(self):
         with self.assertRaises(SystemExit):
             self.equacao("nada#7")
