@@ -419,16 +419,28 @@ def main():
             msg = json.loads(linha)
         except ValueError:
             continue
+        if not isinstance(msg, dict):
+            # `[…]`, `"…"`, `null`: não é requisição; responder sem derrubar o laço
+            _resp(None, erro={"code": -32600, "message": "requisição inválida: a linha não é um objeto JSON-RPC"})
+            continue
         metodo, id_ = msg.get("method"), msg.get("id")
+        params = msg.get("params")
+        params = {} if params is None else params
+        args = params.get("arguments") if isinstance(params, dict) else None
+        args = {} if args is None else args
+        if not isinstance(params, dict) or not isinstance(args, dict):
+            if id_ is not None:
+                _resp(id_, erro={"code": -32602, "message": "parâmetros inválidos: `params` (e `arguments`) "
+                                                            "têm de ser objeto"})
+            continue
         if metodo == "initialize":
-            _resp(id_, {"protocolVersion": (msg.get("params") or {}).get("protocolVersion", PROTOCOLO),
+            _resp(id_, {"protocolVersion": params.get("protocolVersion", PROTOCOLO),
                         "capabilities": {"tools": {}},
                         "serverInfo": {"name": NOME_SERVIDOR, "version": versao()}})
         elif metodo == "tools/list":
             _resp(id_, {"tools": TOOLS})
         elif metodo == "tools/call":
-            nome = (msg.get("params") or {}).get("name")
-            args = (msg.get("params") or {}).get("arguments") or {}
+            nome = params.get("name")
             if nome not in HANDLERS:
                 _resp(id_, erro={"code": -32602, "message": "tool desconhecida: %r" % nome})
                 continue

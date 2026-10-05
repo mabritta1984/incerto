@@ -110,6 +110,28 @@ class TesteProtocolo(unittest.TestCase):
         self.assertEqual(respostas[8]["error"]["code"], -32602)
         self.assertEqual(respostas[9]["error"]["code"], -32601)
 
+    def test_linha_que_nao_e_objeto_ou_params_que_nao_e_objeto_tem_erro_e_nao_derruba(self):
+        # M2: `[1]`, `"x"`, `null` ou `params: [..]` derrubavam o laço (AttributeError) e o servidor morria
+        MCP.CONTEXTO = ({}, "neo4j", BancoFalso())
+        self.addCleanup(setattr, MCP, "CONTEXTO", None)
+        saida = io.StringIO()
+        entrada = io.StringIO("[1, 2]\n\"texto\"\nnull\n{json quebrado\n" + _rpc(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["ler_equacao"]},
+            {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": "x"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ler_equacao", "arguments": [1]}},
+            {"jsonrpc": "2.0", "method": "tools/call", "params": 7},           # notificação: sem resposta
+            {"jsonrpc": "2.0", "id": 4, "method": "ping"}))
+        with mock.patch.object(sys, "stdin", entrada), contextlib.redirect_stdout(saida):
+            MCP.main()
+        respostas = [json.loads(l) for l in saida.getvalue().splitlines()]
+        sem_id = [r for r in respostas if r["id"] is None]
+        self.assertEqual([r["error"]["code"] for r in sem_id], [-32600, -32600, -32600])
+        por_id = {r["id"]: r for r in respostas if r["id"] is not None}
+        self.assertEqual(sorted(por_id), [1, 2, 3, 4])
+        for i in (1, 2, 3):
+            self.assertEqual(por_id[i]["error"]["code"], -32602, por_id[i])
+        self.assertEqual(por_id[4]["result"], {})                   # e o servidor segue respondendo
+
     def test_erro_da_ferramenta_vira_isError_com_proximo_passo(self):
         MCP.CONTEXTO = ({}, "neo4j", BancoFalso({"equacao": OSError("Connection refused")}))
         self.addCleanup(setattr, MCP, "CONTEXTO", None)
