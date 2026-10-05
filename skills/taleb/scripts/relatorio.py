@@ -5,7 +5,8 @@ retornos brasileiros, em Markdown determinístico. Só biblioteca padrão.
 
 Cada número sai com a equação que o produziu e a marcação de fonte: `[corpus]` se `status_equacoes[nome] ==
 "aprovado"`, `[staging]` se `"staging"`, `[externo]` se o nome falta, o status é outro ou `status_equacoes` é
-None. Os `EQ_*` abaixo são um mapa fixo métrica -> RÓTULO de equação: o `:Equacao.rotulo` que o PO dá pela
+None. Exceção: a linha do limiar de κ cita o trecho conferido de onde ele vem (SCFT 8.3.2) e sai
+`[corpus]` sempre — o limiar é texto do corpus, não número calculado por equação. Os `EQ_*` abaixo são um mapa fixo métrica -> RÓTULO de equação: o `:Equacao.rotulo` que o PO dá pela
 decisão `rotular_equacao` (`skills/lavra/references/grafo-incerto.md`) e com que o MCP `ler_equacao` acha a
 equação. `status_equacoes` é indexado por esses rótulos.
 
@@ -15,8 +16,12 @@ usam-nos como vêm; a seção de ergodicidade os converte em retornos simples (e
 0,05% ao dia) e entra SÓ na seção Ergodicidade: excesso = crescimento temporal − taxa_livre_diaria (a
 diferença entre ln(1+taxa) e a taxa é desprezível em taxas diárias e é ignorada de propósito).
 
-Veredito (determinístico): Extremistão se κ(n0=1, n=30) > 0,3 ou α̂ de Hill (cauda esquerda, k = max(10,
-n//20)) < 2; senão Mediocristão. Classe de fragilidade = intervalo bootstrap de 95% de
+Veredito (determinístico): Extremistão se κ_1 = κ(n0=1, n=2) > 0,15 ou α̂ de Hill (cauda esquerda, k = max(10,
+n//20)) < 2; senão Mediocristão. O limiar de κ é o do corpus (SCFT 8.3.2: "Any value of κ above .15
+effectively indicates a high degree of unreliability of the 'normal approximation'"; a eq. 8.8 usa κ_1) e sai
+`[corpus]`; o de α̂ é do incerto e sai `[externo]`. κ_1 é estimado com `REAMOSTRAS_KAPPA_1` reamostras: com as
+4000 padrão de `caudas.kappa`, o κ_1 de uma gaussiana oscila ±0,1 entre amostras e cruzaria o limiar à toa.
+κ(n0=1, n=30) continua no relatório como linha informativa. Classe de fragilidade = intervalo bootstrap de 95% de
 `assimetria_empirica` (500 reamostras, semente fixa): antifrágil se todo acima de 0, frágil se todo abaixo, robusto
 se contém 0. Todo número impresso termina com marcação de fonte; linhas derivadas levam a mais fraca das entradas. O veredito diagnostica exposição e NUNCA recomenda
 ativo: usa só frágil/robusto/antifrágil/Extremistão/Mediocristão e termina com a linha fixa FECHAMENTO.
@@ -52,7 +57,9 @@ EQ_CRESC_TEMPORAL = "crescimento_temporal"
 EQ_CRESC_ENSEMBLE = "crescimento_ensemble"
 
 MINIMO_RETORNOS = 60
-LIMIAR_KAPPA = 0.3
+LIMIAR_KAPPA = 0.15        # [corpus] SCFT 8.3.2, sobre κ_1 = κ(1, 2)
+FONTE_LIMIAR_KAPPA = "SCFT 8.3.2 (Statistical_Consequences_of_Fat_Tails.pdf.md, 8.3.2 Practical significance for sample sufficiency)"
+REAMOSTRAS_KAPPA_1 = 200000
 LIMIAR_ALFA = 2.0
 FECHAMENTO = "Isto não é recomendação de ativo."
 REAMOSTRAS_H = 500
@@ -109,7 +116,8 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
     tag = lambda nome: etiqueta(nome, status_equacoes)
     k = max(10, n // 20)
 
-    kap = caudas.kappa(xs, 1, 30)
+    kap1 = caudas.kappa(xs, 1, 2, reamostras=REAMOSTRAS_KAPPA_1)
+    kap30 = caudas.kappa(xs, 1, 30)
     alfa = caudas.hill(xs, k, "esquerda")
     r2 = caudas.razao_max_soma(xs, 2)[-1]
     r4 = caudas.razao_max_soma(xs, 4)[-1]
@@ -121,7 +129,7 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
     simples = [math.exp(x) - 1.0 for x in xs]
     temporal = convexidade.crescimento_temporal(simples)
     ensemble = convexidade.crescimento_ensemble(simples)
-    extremistao = kap > LIMIAR_KAPPA or alfa < LIMIAR_ALFA
+    extremistao = kap1 > LIMIAR_KAPPA or alfa < LIMIAR_ALFA
     dominio = "Extremistão" if extremistao else "Mediocristão"
 
     L = [f"# Relatório de {ticker}", "",
@@ -131,7 +139,8 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
          "Fonte de cada número: nome da equação e marcação corpus, staging ou externo (externo = a equação "
          "não consta como aprovada ou em staging no grafo).", "",
          "## Caudas", "",
-         f"- κ(n0=1, n=30) = {_f(kap)} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
+         f"- κ_1 = κ(n0=1, n=2) = {_f(kap1)} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
+         f"- κ(n0=1, n=30) = {_f(kap30)} (informativo) — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
          f"- α̂ de Hill, cauda esquerda, k={k} = {_f(alfa)} — equação `{EQ_HILL}` {tag(EQ_HILL)}",
          f"- razão máximo/soma R_n(p=2) = {_f(r2)} — equação `{EQ_MAX_SOMA}` {tag(EQ_MAX_SOMA)}",
          f"- razão máximo/soma R_n(p=4) = {_f(r4)} — equação `{EQ_MAX_SOMA}` {tag(EQ_MAX_SOMA)}", "",
@@ -151,8 +160,9 @@ def relatorio_ativo(ticker, retornos, taxa_livre_diaria, status_equacoes=None,
          f"equação `{EQ_CRESC_TEMPORAL}` {tag(EQ_CRESC_TEMPORAL)}", "",
          "## Veredito", "",
          f"- domínio: **{dominio}** — derivado de κ e α̂ (equações `{EQ_KAPPA}` e `{EQ_HILL}`) {tag_dom}",
-         f"- limiares: Extremistão se κ > {LIMIAR_KAPPA} ou α̂ < {LIMIAR_ALFA:g} — limiar do incerto [externo]",
-         f"- κ = {_f(kap)} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
+         f"- limiares: Extremistão se κ_1 > {LIMIAR_KAPPA} — limiar do corpus, fonte: {FONTE_LIMIAR_KAPPA} [corpus]",
+         f"- limiares: ou se α̂ < {LIMIAR_ALFA:g} — limiar do incerto [externo]",
+         f"- κ_1 = {_f(kap1)} — equação `{EQ_KAPPA}` {tag(EQ_KAPPA)}",
          f"- α̂ = {_f(alfa)} — equação `{EQ_HILL}` {tag(EQ_HILL)}",
          f"- fragilidade: **{classe}** — H = {_f(h)}, {ic} — equação `{EQ_ASSIMETRIA}` "
          f"{tag(EQ_ASSIMETRIA)}",

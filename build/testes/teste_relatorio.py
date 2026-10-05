@@ -51,9 +51,16 @@ class TesteRelatorio(unittest.TestCase):
         self.assertEqual(posicoes, sorted(posicoes))
         self.assertIn("TESTE3", t.split("\n")[0])
 
+    def sem_limiar_do_corpus(self, t):
+        """O relatório sem a linha do limiar de κ, que cita SCFT 8.3.2 e é `[corpus]` sempre (rodada corpus C)."""
+        linhas = t.split("\n")
+        limiar = [l for l in linhas if l.startswith("- limiares: Extremistão se κ_1")]
+        self.assertEqual(len(limiar), 1); self.assertTrue(limiar[0].endswith("[corpus]"))
+        return "\n".join(l for l in linhas if l not in limiar)
+
     def test_sem_grafo_tudo_e_externo(self):
         for status in (None, {}):
-            t = self.rel(status)
+            t = self.sem_limiar_do_corpus(self.rel(status))
             self.assertNotIn("[corpus]", t)
             self.assertNotIn("[staging]", t)
             self.assertIn("[externo]", t)
@@ -70,8 +77,36 @@ class TesteRelatorio(unittest.TestCase):
         dominio = [l for l in linhas if l.startswith("- domínio")]
         self.assertTrue(dominio and dominio[0].endswith("[staging]"))  # mais fraca entre corpus e staging
 
+    def test_dominio_pelo_kappa_1_com_o_limiar_do_corpus(self):
+        # rodada corpus C: SCFT 8.3.2 — "Any value of κ above .15 effectively indicates a high degree of
+        # unreliability of the 'normal approximation'"; a eq. 8.8 usa κ_1 = κ(1, 2)
+        self.assertEqual(R.LIMIAR_KAPPA, 0.15)
+        C = sys.modules["caudas"]
+        import random
+        r = random.Random(3)
+        g = [(date(2020, 1, 1), r.gauss(0, 0.01)) for _ in range(400)]       # α̂ ≥ 2: só o κ decide
+        chamadas = []
+
+        def kappa(valor_1):
+            def f(xs, n0=1, n=30, **kw):
+                chamadas.append((n0, n))
+                return {2: valor_1, 30: 0.0}[n]
+            return f
+        from unittest import mock
+        for valor, dominio in ((0.16, "Extremistão"), (0.15, "Mediocristão"), (0.10, "Mediocristão")):
+            with mock.patch.object(C, "kappa", kappa(valor)):
+                t = R.relatorio_ativo("TESTE3", g, 0.0, None)
+            self.assertIn("domínio: **%s**" % dominio, t, valor)
+        self.assertIn((1, 2), chamadas); self.assertIn((1, 30), chamadas)
+        t = self.rel({R.EQ_KAPPA: "aprovado"})
+        limiar = [l for l in t.split("\n") if l.startswith("- limiares")][0]
+        self.assertIn("κ_1 > 0.15", limiar); self.assertIn("SCFT 8.3.2", limiar)
+        self.assertIn("[corpus]", limiar)
+        self.assertRegex(t, r"- κ_1 = κ\(n0=1, n=2\) = \S+ — equação `kappa` \[corpus\]")
+        self.assertRegex(t, r"κ\(n0=1, n=30\) = \S+ \(informativo\) — equação `kappa` \[corpus\]")
+
     def test_status_desconhecido_e_externo(self):
-        t = self.rel({R.EQ_KAPPA: "rejeitado"})
+        t = self.sem_limiar_do_corpus(self.rel({R.EQ_KAPPA: "rejeitado"}))
         self.assertNotIn("[corpus]", t)
 
     def test_todo_numero_traz_equacao_e_marca(self):
@@ -239,7 +274,7 @@ class TesteCLI(unittest.TestCase):
         codigo, out, err = self.roda("--ticker", "TESTE3", "--cotahist", caminho, "--sgs-cache", cache,
                                      "--status-equacoes", status)
         self.assertEqual(codigo, 0, err)
-        self.assertRegex(out, r"κ\(n0=1, n=30\) = \S+ — equação `kappa` \[corpus\]")
+        self.assertRegex(out, r"κ_1 = κ\(n0=1, n=2\) = \S+ — equação `kappa` \[corpus\]")
         self.assertRegex(out, r"α̂ de Hill.*— equação `hill` \[staging\]")
         self.assertRegex(out, r"razão máximo/soma.*`razao_max_soma` \[externo\]")
         for conteudo in ("[1, 2]", "{\"kappa\": 1}", "não é json"):

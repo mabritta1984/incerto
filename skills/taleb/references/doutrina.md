@@ -34,7 +34,7 @@ resultado.
 
 No diagnóstico: `caudas.py` mede o domínio por três vias — razão máximo/soma R_n(p), expoente de cauda α̂
 de Hill e a métrica κ de Taleb (velocidade de convergência da média). O `relatorio.py` declara Extremistão
-quando κ(n0=1, n=30) > 0,3 ou α̂ < 2.
+quando κ_1 = κ(n0=1, n=2) > 0,15 (limiar do corpus, SCFT 8.3.2) ou α̂ < 2.
 
 fonte: [externo] — Statistical Consequences of Fat Tails (2020); The Black Swan (2007), cap. 3
 

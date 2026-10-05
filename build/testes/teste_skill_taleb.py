@@ -115,6 +115,11 @@ class TesteSkillTaleb(unittest.TestCase):
         # O limiar do Extremistão é o mesmo do relatorio.py.
         conds = [campo(c, "condicao") for _, c in vs]
         self.assertIn(f"kappa > {R.LIMIAR_KAPPA} or alpha < {R.LIMIAR_ALFA:g}", conds)
+        # rodada corpus C: o limiar de κ é o do corpus (SCFT 8.3.2), sobre κ_1 = κ(1, 2)
+        self.assertIn("kappa > 0.15 or alpha < 2", conds)
+        texto = ler(HEURISTICAS)
+        self.assertIn("8.3.2", texto); self.assertIn("κ(n0=1, n=2)", texto)
+        self.assertNotIn("0,3", texto); self.assertNotIn("0.3 ", texto)
 
     def test_heuristicas_nao_autorizam_variancia(self):
         # Com 2 <= alpha < 4 a variância existe mas sua estimativa é instável: nenhuma heurística a licencia.

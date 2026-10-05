@@ -74,6 +74,18 @@ class TesteCaudas(unittest.TestCase):
         self.assertLess(abs(C.kappa(self.normal)), 0.15)
         self.assertLess(abs(C.kappa(self.cauchy, robusto=True) - 1.0), 0.15)
 
+    def test_kappa_1_da_student_t3_reproduz_o_corpus(self):
+        # rodada corpus C: conferido no Wolfram, Student T(3) dá κ_1 = κ(1, 2) = 0,2904 e
+        # n_ν = 30^(-1/(κ_1 − 1)) = 120,7 — os "120 observations" de SCFT 8.3.2. Por simulação, semente fixa e
+        # tolerância folgada (a razão M(2)/M(1) por bootstrap oscila ±0,04 entre sementes com 200 mil reamostras)
+        import random
+        r = random.Random(11)
+        t3 = [r.gauss(0, 1) / math.sqrt(sum(r.gauss(0, 1) ** 2 for _ in range(3)) / 3) for _ in range(100000)]
+        k1 = C.kappa(t3, 1, 2, reamostras=200000)
+        self.assertLess(abs(k1 - 0.29), 0.06, k1)
+        self.assertGreater(k1, 0.15)                                    # acima do limiar do corpus
+        self.assertAlmostEqual(30 ** (-1 / (0.2904 - 1)), 120.7, delta=0.1)
+
     def test_kappa_e_deterministico_pela_semente(self):
         xs = C.amostra_normal(300, 1)
         a = C.kappa(xs, n=10, reamostras=200, semente=5)
