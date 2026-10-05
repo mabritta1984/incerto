@@ -11,7 +11,10 @@ e gravados como estão.
 Linhas (uma por prova, `json.dumps(sort_keys=True, ensure_ascii=False)`, `newline="\\n"`, sem timestamp):
   derivação       {"prova": "P2", "via": "wolfram", "mae", "filha", "codigo", "saida", "veredito", "impressao"}
   momento fechado {"prova": "momento", "via": "wolfram", "equacao", "codigo", "saida", "veredito", "impressao"}
-`veredito` ∈ verde|vermelho|indeterminado, decidido pelo agente segundo `references/fiscal.md`.
+`veredito` ∈ verde|vermelho|indeterminado, decidido pelo agente segundo `references/fiscal.md` — mas verde é
+conferido: só entra se a última linha `Out[n]=` da saída for exatamente `0` ou uma lista só de `0`
+(`{0, 0}`); saída sem `Out[n]=` ou com outro resultado recusa o verde. Vermelho e indeterminado
+entram como o agente os decidiu.
 `impressao` amarra o veredito ao conteúdo provado: é `fiscal.impressao_esperada` (dono único) calculada de
 `<raiz-esteira>/equacoes-<onda>.jsonl` e `derivacoes-<onda>.jsonl` no momento do registro; derivação não
 declarada (ou declarada mais de uma vez), equação desconhecida ou momento não declarado → recusa. Se o
@@ -33,6 +36,7 @@ import argparse
 import io
 import json
 import os
+import re
 import sys
 
 import fiscal             # vizinhos em skills/lavra/scripts/: a pasta do script já é o sys.path[0] ao rodá-lo
@@ -48,6 +52,28 @@ def _ler_verbatim(caminho, rotulo):
     if not texto.strip():
         sys.exit("--%s %s está vazio: prova sem %s não é prova" % (rotulo, caminho, rotulo))
     return texto
+
+
+RE_OUT = re.compile(r"^Out\[\d+\]=(.*)$", re.M)
+RE_ZERO = re.compile(r"^(?:0|\{\s*0(?:\s*,\s*0)*\s*\})$")
+
+
+def resultado_wolfram(saida):
+    """O que vem depois do último `Out[n]=` da saída (sem espaços nas pontas), ou None se não houver."""
+    achados = RE_OUT.findall(saida.replace("\r\n", "\n").replace("\r", "\n"))
+    return achados[-1].strip() if achados else None
+
+
+def conferir_veredito(veredito, saida):
+    """`ValueError` se `veredito` é verde e o último `Out[n]=` não é exatamente `0` nem uma lista só de `0`
+    (`{0, 0}`). Vermelho e indeterminado entram como o agente decidiu (`references/fiscal.md`)."""
+    if veredito != fiscal.VERDE:
+        return
+    resultado = resultado_wolfram(saida)
+    if resultado is None or not RE_ZERO.match(resultado):
+        raise ValueError("veredito verde recusado: o último `Out[n]=` da saída é %s, e verde exige exatamente `0` "
+                         "ou uma lista só de `0` (`{0, 0}`) — o veredito é o que a saída diz"
+                         % ("ausente" if resultado is None else repr(resultado)))
 
 
 def _linha_json(linha):
@@ -107,6 +133,11 @@ def main(argv=None):
     linha = {"prova": args.prova, "via": args.via, "veredito": args.veredito,
              "codigo": _ler_verbatim(args.codigo, "codigo"), "saida": _ler_verbatim(args.saida, "saida")}
     linha.update({k: getattr(args, k) for k in proprias})
+
+    try:
+        conferir_veredito(args.veredito, linha["saida"])
+    except ValueError as e:
+        sys.exit("não registrado — %s" % e)
 
     def onda(prefixo):
         return os.path.join(args.raiz_esteira, "%s-%s.jsonl" % (prefixo, args.onda))

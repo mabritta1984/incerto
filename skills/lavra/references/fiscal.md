@@ -57,6 +57,10 @@ cujo código confere todas de uma vez (ver abaixo).
                --codigo <arquivo.wl> --saida <arquivo.txt> --veredito verde|vermelho|indeterminado
 
    Chave já registrada é recusada; refazer uma prova exige `--substituir` (a linha antiga sai do arquivo).
+   **O verde é conferido**: o registrador lê a última linha `Out[n]=` da saída e só aceita `--veredito
+   verde` se o que vem depois dela for exatamente `0` ou uma lista só de `0` (`{0}`, `{0, 0}`); saída sem
+   `Out[n]=`, ou com qualquer outro resultado, recusa o verde sem gravar nada. `vermelho` e
+   `indeterminado` são registrados como o agente os decidiu.
 7. `fiscal.py --onda <onda>` de novo: a P4 junta as provas às linhas P2 e aos momentos e dá o veredito
    final da segunda via.
 

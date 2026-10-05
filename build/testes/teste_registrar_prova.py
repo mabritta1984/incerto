@@ -21,9 +21,9 @@ RP = carregar("skills/lavra/scripts/registrar_prova.py")
 ONDA = "2026-10-T10"
 CODIGO_KELLY = "Simplify[(p - (1 - p)/b) - (f /. First@Solve[p b/(1 + b f) - (1 - p)/(1 - f) == 0, f])]\n"
 SAIDA_KELLY = "Out[1]= 0\n"
-CODIGO_PARETO = ("Expectation[x, x \\[Distributed] ParetoDistribution[L, alpha], "
-                 "Assumptions -> alpha > 1 && L > 0]\n")
-SAIDA_PARETO = "Symbol::undefined: Warning: Global symbol L is undefined.\n\nOut[1]= (alpha*L)/(-1 + alpha)\n"
+CODIGO_PARETO = ("FullSimplify[Expectation[x, x \\[Distributed] ParetoDistribution[L, alpha], "
+                 "Assumptions -> alpha > 1 && L > 0] - (alpha L/(alpha - 1)), Assumptions -> alpha > 1 && L > 0]\n")
+SAIDA_PARETO = "Symbol::undefined2: Warning: Global symbols \"L, L, L, L\" are undefined.\n\nOut[1]= 0\n"
 # o registrador não parseia os srepr: só os imprime na `impressao`
 EQUACOES = [{"nome": n, "srepr": "Symbol('%s')" % n.replace("#", "")} for n in
             ("kelly#1", "kelly#2", "kelly#3", "kelly#9", "a#1", "a#2")] + [
@@ -153,6 +153,30 @@ class TesteRegistrar(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.momento()
         self.assertFalse(os.path.exists(self.arquivo))
+
+    def test_verde_so_com_saida_zero(self):
+        # I2: o veredito era digitado sem conferência; verde exige a última linha `Out[n]=` exatamente 0 ou {0, …}
+        for saida in ("Out[1]= (alpha*L)/(-1 + alpha)\n", "Out[1]= 0.\n", "Out[1]= {0, x}\n", "Out[1]= {}\n",
+                      "só mensagens, sem Out\n", "Out[1]= 0\nOut[2]= x\n", "Out[1]= 00\n", "Out[1]= -0\n"):
+            with self.assertRaises(SystemExit, msg=saida) as c:
+                self.momento_com_saida(saida, "verde")
+            self.assertIn("verde", str(c.exception.code))
+            self.assertFalse(os.path.exists(self.arquivo), saida)
+        for saida in ("Out[1]= 0", "Symbol::undefined: aviso\n\nOut[1]= 0\n", "Out[3]=  {0, 0}  \n", "Out[1]= {0}\n",
+                      "Out[1]= x\nOut[2]= 0\n", "Out[12]= {0,0,0}\r\n"):
+            self.assertEqual(self.momento_com_saida(saida, "verde"), 0, saida)
+            os.remove(self.arquivo)
+        # vermelho e indeterminado entram como o agente decidiu
+        for veredito, saida in (("vermelho", "Out[1]= 0\n"), ("indeterminado", "Out[1]= 0\n"),
+                                ("vermelho", "Out[1]= x - 1\n"), ("indeterminado", "$Aborted\n")):
+            self.assertEqual(self.momento_com_saida(saida, veredito), 0, (veredito, saida))
+            os.remove(self.arquivo)
+        with self.assertRaises(SystemExit):                    # vale para a derivação também
+            self.p2("kelly#1", "kelly#9", "verde", "Out[1]= ((-1 + b^2)*(-1 + p))/b\n")
+
+    def momento_com_saida(self, saida, veredito):
+        return self.rodar("--prova", "momento", "--equacao", "pareto#3", "--codigo", self.texto("p.wl", CODIGO_PARETO),
+                          "--saida", self.texto("p.txt", saida), "--veredito", veredito)
 
     def test_argumentos_incoerentes_sao_recusados(self):
         cod, sai = self.texto("c.wl", CODIGO_KELLY), self.texto("s.txt", SAIDA_KELLY)
